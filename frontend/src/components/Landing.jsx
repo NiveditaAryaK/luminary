@@ -18,9 +18,9 @@ export default function Landing({ onStart }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ genre, premise })
       })
-      const data = await r.json()
+      const data = await r.json().catch(() => ({}))
       if (data.session_id) onStart({ sessionId: data.session_id, genre, premise, title: data.title })
-      else setErr(data.detail || 'Failed to start story.')
+      else setErr(data.detail || (r.ok ? 'Failed to start story.' : `Request failed (${r.status}).`))
     } catch(e) { setErr('Connection error. Please try again.') }
     setLoading(false)
   }

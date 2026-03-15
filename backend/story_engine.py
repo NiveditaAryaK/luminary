@@ -24,8 +24,9 @@ from google.genai import types
 # Configuration
 # ----------------------------------------------------------------------------
 
-GEMINI_MODEL = "gemini-2.0-flash-exp"
-FALLBACK_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = os.getenv("GEMINI_STORY_MODEL", "gemini-2.5-flash-image")
+FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
+TITLE_MODEL = os.getenv("GEMINI_TITLE_MODEL", "gemini-2.5-flash")
 
 SYSTEM_INSTRUCTION = """You are Luminary, a master cinematic storyteller and creative director.
 
@@ -187,7 +188,7 @@ Continue the story with consequences, an illustration, and 2-3 new choices."""
 
     async def generate_title(self, genre: StoryGenre, premise: str) -> str:
         r = await self.client.aio.models.generate_content(
-            model=FALLBACK_MODEL,
+            model=TITLE_MODEL,
             contents=[{"role": "user", "parts": [{"text": f"Generate a single compelling title for a {genre.value} story: {premise}. Reply with ONLY the title."}]}],
             config=types.GenerateContentConfig(temperature=1.0, max_output_tokens=50),
         )

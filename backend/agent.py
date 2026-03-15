@@ -1,7 +1,9 @@
 from google.adk.agents import Agent
 from story_engine import LuminaryEngine, StoryGenre
+import os
 
 engine = LuminaryEngine()
+AGENT_MODEL = os.getenv("GEMINI_TITLE_MODEL", "gemini-2.5-flash")
 
 def start_story(genre: str, premise: str) -> dict:
     """Start a new interactive story session."""
@@ -33,7 +35,7 @@ def list_genres() -> dict:
 
 root_agent = Agent(
     name="luminary_agent",
-    model="gemini-2.0-flash",
+    model=AGENT_MODEL,
     description="Luminary cinematic AI storytelling agent",
     instruction="You are Luminary, a master cinematic storyteller. Help users create immersive interactive stories with vivid illustrations.",
     tools=[start_story, continue_story, get_story_status, list_genres],

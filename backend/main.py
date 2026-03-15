@@ -1,5 +1,5 @@
 
-import os, asyncio, uuid
+import os, uuid
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -10,6 +10,10 @@ from google import genai
 from google.genai import types
 
 load_dotenv()
+
+TITLE_MODEL = os.getenv("GEMINI_TITLE_MODEL", "gemini-2.5-flash")
+STORY_MODEL = os.getenv("GEMINI_STORY_MODEL", "gemini-2.5-flash-image")
+FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
 
 SYSTEM_INSTRUCTION = """You are Luminary, a master cinematic storyteller.
 Create immersive interactive stories with INTERLEAVED text and generated images.
@@ -35,20 +39,42 @@ class CreateReq(BaseModel):
     premise: str
 
 
+def format_model_error(exc: Exception) -> str:
+    message = str(exc)
+    lowered = message.lower()
+    if "resource_exhausted" in lowered or "quota" in lowered or "429" in lowered:
+        return "Gemini quota exceeded for this API key. Please check billing, limits, or try again later."
+    if "api key" in lowered or "permission" in lowered or "unauthorized" in lowered or "403" in lowered:
+        return "Gemini request was rejected. Verify GOOGLE_API_KEY and project access."
+    if "not_found" in lowered or "no longer available" in lowered or "404" in lowered:
+        return "The configured Gemini model is unavailable. Update the backend model configuration."
+    return "Gemini request failed. Please verify your model access and try again."
+
+
 @app.get("/health")
 def health(): return {"status":"healthy"}
+
+@app.get("/api/health")
+def api_health(): return health()
 
 @app.post("/story/create")
 async def create(req: CreateReq):
     sid = str(uuid.uuid4())
-    title_resp = await client.aio.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=[{"role":"user","parts":[{"text":f"One short cinematic title for a {req.genre} story: {req.premise}. Reply with ONLY the title."}]}],
-        config=types.GenerateContentConfig(temperature=1.0, max_output_tokens=30)
-    )
-    title = title_resp.text.strip().strip(chr(34))
+    try:
+        title_resp = await client.aio.models.generate_content(
+            model=TITLE_MODEL,
+            contents=[{"role":"user","parts":[{"text":f"One short cinematic title for a {req.genre} story: {req.premise}. Reply with ONLY the title."}]}],
+            config=types.GenerateContentConfig(temperature=1.0, max_output_tokens=30)
+        )
+        title = title_resp.text.strip().strip(chr(34))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=format_model_error(exc)) from exc
     sessions[sid] = {"genre":req.genre,"premise":req.premise,"title":title,"history":[],"turns":0}
     return {"session_id":sid,"title":title,"genre":req.genre}
+
+@app.post("/api/story/create")
+async def api_create(req: CreateReq):
+    return await create(req)
 
 @app.websocket("/ws/{sid}")
 async def ws_story(websocket: WebSocket, sid: str):
@@ -72,7 +98,7 @@ async def ws_story(websocket: WebSocket, sid: str):
                 await websocket.send_json({"type":"status","content":"generating"})
                 try:
                     resp = await client.aio.models.generate_content(
-                        model="gemini-2.0-flash-exp",
+                        model=STORY_MODEL,
                         contents=s["history"],
                         config=types.GenerateContentConfig(
                             system_instruction=SYSTEM_INSTRUCTION,
@@ -91,14 +117,21 @@ async def ws_story(websocket: WebSocket, sid: str):
                             await websocket.send_json({"type":"image","content":img,"mime_type":part.inline_data.mime_type})
                             parts_text.append({"text":"[illustration]"})
                     s["history"].append({"role":"model","parts":parts_text})
-                except Exception as e:
-                    resp2 = await client.aio.models.generate_content(
-                        model="gemini-2.0-flash",
-                        contents=s["history"],
-                        config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION,temperature=0.9,max_output_tokens=2048)
-                    )
-                    await websocket.send_json({"type":"text","content":resp2.text})
-                    s["history"].append({"role":"model","parts":[{"text":resp2.text}]})
+                except Exception:
+                    try:
+                        resp2 = await client.aio.models.generate_content(
+                            model=FALLBACK_MODEL,
+                            contents=s["history"],
+                            config=types.GenerateContentConfig(
+                                system_instruction=SYSTEM_INSTRUCTION,
+                                temperature=0.9,
+                                max_output_tokens=2048
+                            )
+                        )
+                        await websocket.send_json({"type":"text","content":resp2.text})
+                        s["history"].append({"role":"model","parts":[{"text":resp2.text}]})
+                    except Exception as fallback_exc:
+                        await websocket.send_json({"type":"error","content":format_model_error(fallback_exc)})
                 await websocket.send_json({"type":"status","content":"complete"})
             elif data.get("type")=="ping":
                 await websocket.send_json({"type":"pong"})

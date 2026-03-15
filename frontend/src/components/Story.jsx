@@ -6,6 +6,7 @@ export default function Story({ session, onExit }) {
   const [choices, setChoices] = useState([])
   const [streaming, setStreaming] = useState(false)
   const [title, setTitle] = useState(session.title || 'Your Story')
+  const [error, setError] = useState('')
   const bottomRef = useRef(null)
   const wsRef = useRef(null)
 
@@ -24,12 +25,16 @@ export default function Story({ session, onExit }) {
     wsRef.current = ws
     setStreaming(true)
     setChoices([])
+    setError('')
     let buf = ''
     let fullText = ''
+    let receivedPayload = false
+    let closedIntentionally = false
 
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data)
       if (msg.type === 'text') {
+        receivedPayload = true
         buf += msg.content
         fullText += msg.content
         setSegments(s => {
@@ -38,6 +43,7 @@ export default function Story({ session, onExit }) {
           return [...s, { type:'text_stream', content: buf }]
         })
       } else if (msg.type === 'image') {
+        receivedPayload = true
         buf = ''
         setSegments(s => [...s, { type:'image', content: msg.content, mime: msg.mime_type }])
       } else if (msg.type === 'status') {
@@ -46,24 +52,38 @@ export default function Story({ session, onExit }) {
           const parsed = parseChoices(fullText)
           if (parsed.length) setChoices(parsed)
           setStreaming(false)
+          closedIntentionally = true
           ws.close()
         }
       } else if (msg.type === 'choices') {
+        receivedPayload = true
         setChoices(msg.choices || [])
         setStreaming(false)
+        closedIntentionally = true
         ws.close()
       } else if (msg.type === 'title') {
         setTitle(msg.content)
       } else if (msg.type === 'done') {
         setStreaming(false)
+        closedIntentionally = true
         ws.close()
       } else if (msg.type === 'system') {
         const titleMatch = /Connected:\s*(.*)$/.exec(msg.content || '')
         if (titleMatch?.[1]) setTitle(titleMatch[1])
+      } else if (msg.type === 'error') {
+        setError(msg.content || 'Story generation failed.')
+        setStreaming(false)
+        closedIntentionally = true
+        ws.close()
       }
     }
     ws.onopen = () => ws.send(JSON.stringify({ type: 'choice', content: input }))
-    ws.onerror = () => setStreaming(false)
+    ws.onerror = () => {
+      if (!closedIntentionally && !receivedPayload) {
+        setError('Live story connection failed.')
+      }
+      setStreaming(false)
+    }
     ws.onclose = () => setStreaming(false)
   }
 
@@ -112,6 +132,9 @@ export default function Story({ session, onExit }) {
         <button className="exit-btn" onClick={onExit}>✕ New Story</button>
       </div>
       <div className="segments">
+        {error && (
+          <p className="seg-text" style={{ color: 'var(--gold)' }}>{error}</p>
+        )}
         {segments.map((seg, i) => (
           <div key={i}>
             {(seg.type === 'text' || seg.type === 'text_stream') && (
