@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { useStorySession } from '../hooks/useStorySession'
+import { useNarration } from '../hooks/useNarration'
+import { useSpeechInput } from '../hooks/useSpeechInput'
 import { stripChoiceMarkup } from '../utils/storyText'
 import { fetchStorySnapshot } from '../utils/storyApi'
 
@@ -18,6 +20,33 @@ export default function Story({ session, onExit, onSnapshot }) {
     ))
     .filter((seg) => (seg.type === 'text' || seg.type === 'text_stream' ? seg.content : true))
   const turnCount = segments.filter((seg) => seg.type === 'choice').length + 1
+  const latestNarration = [...visibleSegments]
+    .reverse()
+    .find((seg) => seg.type === 'text' || seg.type === 'text_stream')?.content || ''
+  const {
+    cloudAvailable,
+    cloudBudgetReached,
+    cloudCharBudget,
+    cloudCharsUsed,
+    isSpeaking,
+    mode,
+    selectedVoice,
+    setSelectedVoice,
+    setVolume,
+    speak,
+    stop,
+    supported: narrationSupported,
+    voices,
+    volume,
+  } = useNarration(latestNarration, session.genre)
+  const {
+    isListening,
+    startListening,
+    stopListening,
+    supported: speechInputSupported,
+  } = useSpeechInput({
+    onResult: (value) => setDirection(value),
+  })
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -88,6 +117,41 @@ export default function Story({ session, onExit, onSnapshot }) {
             <span className="status-dot" />
             {streaming ? 'Generating scene' : 'Awaiting your direction'}
           </div>
+          {narrationSupported && (
+            <div className="panel-card">
+              <span>Narration</span>
+              <p className="narration-mode">
+                {mode === 'cloud'
+                  ? 'Cloud voice with SSML modulation'
+                  : cloudAvailable
+                    ? 'Browser voice fallback'
+                    : 'Local browser voice. Enable Cloud TTS billing and credentials for cinematic modulation.'}
+              </p>
+              {cloudAvailable && (
+                <p className="narration-budget">
+                  {cloudBudgetReached
+                    ? `Cloud narration limit reached (${cloudCharsUsed}/${cloudCharBudget} chars). Using local voice now.`
+                    : `Cloud narration budget: ${cloudCharsUsed}/${cloudCharBudget} chars used.`}
+                </p>
+              )}
+              <div className="voice-stack">
+                <button className={`voice-action ${isSpeaking ? 'live' : ''}`} onClick={isSpeaking ? stop : speak} type="button">
+                  {isSpeaking ? 'Stop voice' : 'Play voice'}
+                </button>
+                <select className="voice-select" value={selectedVoice} onChange={(e) => setSelectedVoice(e.target.value)}>
+                  {voices.map((voice) => (
+                    <option key={`${voice.name}-${voice.lang}`} value={voice.name}>
+                      {voice.name}
+                    </option>
+                  ))}
+                </select>
+                <label className="voice-range">
+                  <span>Volume</span>
+                  <input type="range" min="0" max="1" step="0.05" value={volume} onChange={(e) => setVolume(Number(e.target.value))} />
+                </label>
+              </div>
+            </div>
+          )}
         </aside>
 
         <section className="story-main">
@@ -147,6 +211,14 @@ export default function Story({ session, onExit, onSnapshot }) {
                 onChange={(e) => setDirection(e.target.value)}
                 disabled={streaming}
               />
+              {speechInputSupported && (
+                <div className="voice-tools inline">
+                  <button className={`voice-btn ${isListening ? 'live' : ''}`} onClick={isListening ? stopListening : startListening} type="button">
+                    {isListening ? 'Stop dictation' : 'Dictate direction'}
+                  </button>
+                  <span>{isListening ? 'Listening...' : 'Speak the next direction out loud.'}</span>
+                </div>
+              )}
               <button className="director-submit" type="submit" disabled={streaming || !direction.trim()}>
                 Send Direction
               </button>

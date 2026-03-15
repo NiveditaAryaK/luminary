@@ -284,6 +284,32 @@ textarea:focus {
   border-color: var(--gold);
 }
 
+.voice-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.voice-tools span {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
+.voice-btn {
+  border: 1px solid rgba(255, 226, 160, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.65rem 0.95rem;
+  cursor: pointer;
+}
+
+.voice-btn.live {
+  border-color: rgba(109, 211, 160, 0.35);
+  color: #8ef0bf;
+}
+
 .prompt-bank {
   display: flex;
   flex-wrap: wrap;

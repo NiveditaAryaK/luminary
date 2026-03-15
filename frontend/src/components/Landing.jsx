@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSpeechInput } from '../hooks/useSpeechInput'
 import './Landing.css'
 
 const GENRES = ['fantasy', 'sci-fi', 'mystery', 'horror', 'romance', 'adventure', 'historical']
@@ -13,6 +14,9 @@ export default function Landing({ onResume, onStart, stories, user, onSignIn, on
   const [premise, setPremise] = useState('')
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
+  const { isListening, startListening, stopListening, supported } = useSpeechInput({
+    onResult: (value) => setPremise(value),
+  })
 
   async function handleStart() {
     if (!premise.trim()) {
@@ -127,6 +131,15 @@ export default function Landing({ onResume, onStart, stories, user, onSignIn, on
               value={premise}
               onChange={(e) => setPremise(e.target.value)}
             />
+
+            {supported && (
+              <div className="voice-tools">
+                <button className={`voice-btn ${isListening ? 'live' : ''}`} onClick={isListening ? stopListening : startListening}>
+                  {isListening ? 'Stop voice input' : 'Use voice input'}
+                </button>
+                <span>{isListening ? 'Listening for your premise...' : 'Speak your story brief instead of typing.'}</span>
+              </div>
+            )}
 
             <div className="prompt-bank">
               {PROMPTS.map((prompt) => (

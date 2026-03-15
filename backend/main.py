@@ -2,6 +2,7 @@
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from google import genai
@@ -9,15 +10,17 @@ from loguru import logger
 
 from config import PORT
 from gemini_utils import format_model_error
-from schemas import CreateReq, RestoreReq
+from narration_service import NarrationService
+from schemas import CreateReq, NarrationReq, RestoreReq
 from story_service import StoryService
 
 client = None
 story_service = None
+narration_service = None
 
 @asynccontextmanager
 async def lifespan(app):
-    global client, story_service
+    global client, narration_service, story_service
     logger.remove()
     logger.add(
         os.path.join(os.path.dirname(__file__), "server.log"),
@@ -29,6 +32,12 @@ async def lifespan(app):
     logger.add(lambda msg: print(msg, end=""), level="INFO")
     client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     story_service = StoryService(client)
+    try:
+        narration_service = NarrationService()
+        logger.info("Cloud TTS ready")
+    except Exception as exc:
+        narration_service = None
+        logger.warning("Cloud TTS unavailable: {}", exc)
     logger.info("Luminary ready")
     yield
 
@@ -78,6 +87,35 @@ async def restore_story(req: RestoreReq):
 async def api_restore_story(req: RestoreReq):
     return await restore_story(req)
 
+@app.get("/narration/voices")
+def list_narration_voices():
+    if not narration_service:
+        raise HTTPException(status_code=503, detail="Cloud TTS is not configured.")
+    return {"voices": narration_service.list_voices()}
+
+@app.get("/api/narration/voices")
+def api_list_narration_voices():
+    return list_narration_voices()
+
+@app.post("/narration/speak")
+def synthesize_narration(req: NarrationReq):
+    if not narration_service:
+        raise HTTPException(status_code=503, detail="Cloud TTS is not configured.")
+    try:
+        return narration_service.synthesize(
+            text=req.text,
+            genre=req.genre,
+            voice_name=req.voice_name,
+            language_code=req.language_code,
+        )
+    except Exception as exc:
+        logger.exception("Narration synthesis failed: {}", exc)
+        raise HTTPException(status_code=503, detail="Failed to synthesize narration.") from exc
+
+@app.post("/api/narration/speak")
+def api_synthesize_narration(req: NarrationReq):
+    return synthesize_narration(req)
+
 @app.websocket("/ws/{sid}")
 async def ws_story(websocket: WebSocket, sid: str):
     await websocket.accept()
@@ -87,13 +125,13 @@ async def ws_story(websocket: WebSocket, sid: str):
         await websocket.send_json({"type":"error","content":"Session not found"})
         await websocket.close(); return
     logger.info("WebSocket connected for session_id={}", sid)
-    await websocket.send_json({"type":"system","content":f"Connected: {session['title']}"})
+    await websocket.send_json({"type":"system","content":f"Connected: {session.title}"})
     try:
         while True:
             data = await websocket.receive_json()
             if data.get("type") == "choice":
                 choice = data.get("content","")
-                logger.info("Running story turn for session_id={} turn={} choice='{}'", sid, session["turns"] + 1, choice)
+                logger.info("Running story turn for session_id={} turn={} choice='{}'", sid, session.turns + 1, choice)
                 await websocket.send_json({"type":"status","content":"generating"})
                 result = await story_service.run_turn(session, choice)
                 for event in result["events"]:

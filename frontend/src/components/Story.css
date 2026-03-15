@@ -1,6 +1,6 @@
 .story-page {
   min-height: 100vh;
-  max-width: 1260px;
+  max-width: 1320px;
   margin: 0 auto;
   padding: 2rem 1.5rem 3rem;
 }
@@ -45,8 +45,9 @@
 
 .story-layout {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 1.5rem;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 1.75rem;
+  align-items: start;
 }
 
 .story-panel {
@@ -69,7 +70,7 @@
 
 .panel-card {
   border-radius: 1.1rem;
-  padding: 1rem;
+  padding: 1.05rem;
 }
 
 .panel-card span,
@@ -85,17 +86,71 @@
 .panel-card strong {
   font-family: 'Cormorant Garamond', serif;
   text-transform: capitalize;
-  font-size: 1.8rem;
+  font-size: 1.65rem;
   color: var(--text);
 }
 
 .panel-card p {
   color: #d0cabd;
-  line-height: 1.65;
+  line-height: 1.7;
+  font-size: 0.98rem;
+}
+
+.voice-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.narration-mode {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+  margin-bottom: 0.8rem;
+}
+
+.narration-budget {
+  color: var(--gold-light);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin-bottom: 0.85rem;
+}
+
+.voice-action,
+.voice-select {
+  border-radius: 0.9rem;
+  border: 1px solid rgba(255, 226, 160, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  padding: 0.8rem 0.9rem;
+  width: 100%;
+}
+
+.voice-action {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.voice-action.live {
+  color: #8ef0bf;
+  border-color: rgba(109, 211, 160, 0.35);
+}
+
+.voice-range {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.voice-range input {
+  width: 100%;
+  accent-color: var(--gold);
 }
 
 .panel-card.wide {
-  min-height: 180px;
+  min-height: 0;
 }
 
 .panel-status {
@@ -131,7 +186,7 @@
 
 .segment-card {
   border-radius: 1.35rem;
-  padding: 1.35rem;
+  padding: 1.45rem;
 }
 
 .segment-card.image-card {
@@ -147,8 +202,8 @@
 }
 
 .seg-text {
-  font-size: 1.08rem;
-  line-height: 1.95;
+  font-size: 1.05rem;
+  line-height: 1.88;
   color: #f0eadc;
   white-space: pre-wrap;
 }
@@ -163,13 +218,13 @@
 .choices-wrap {
   margin-top: 1.4rem;
   border-radius: 1.35rem;
-  padding: 1.2rem;
+  padding: 1.25rem;
 }
 
 .director-box {
   margin-top: 1rem;
   border-radius: 1.35rem;
-  padding: 1.2rem;
+  padding: 1.25rem;
   border: 1px solid rgba(255, 226, 160, 0.12);
   background: rgba(13, 15, 24, 0.78);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
@@ -184,7 +239,7 @@
 
 .director-input {
   width: 100%;
-  min-height: 110px;
+  min-height: 92px;
   resize: vertical;
   border-radius: 1rem;
   border: 1px solid rgba(255, 226, 160, 0.12);
@@ -201,18 +256,26 @@
 
 .director-submit {
   align-self: flex-start;
-  border: 1px solid rgba(255, 226, 160, 0.14);
+  border: none;
   background: linear-gradient(135deg, #ffe39b, #d9a04f);
   color: #0f1017;
-  padding: 0.85rem 1.1rem;
+  padding: 0.95rem 1.25rem;
   border-radius: 999px;
   font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 10px 24px rgba(211, 160, 72, 0.18);
 }
 
 .director-submit:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.voice-tools.inline {
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.1rem 0 0.15rem;
 }
 
 .choices-header {
@@ -234,7 +297,7 @@
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 226, 160, 0.1);
   color: var(--text);
-  padding: 1rem 1.1rem;
+  padding: 1rem 1.15rem;
   border-radius: 1rem;
   cursor: pointer;
   text-align: left;
@@ -327,5 +390,16 @@
 
   .choice-btn {
     grid-template-columns: 1fr;
+  }
+
+  .voice-tools.inline {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .director-submit,
+  .voice-action,
+  .voice-select {
+    width: 100%;
   }
 }

@@ -12,3 +12,10 @@ class RestoreReq(BaseModel):
     premise: str
     history: list[dict]
     turns: int = 0
+
+
+class NarrationReq(BaseModel):
+    text: str
+    genre: str = "fantasy"
+    voice_name: str | None = None
+    language_code: str | None = None
