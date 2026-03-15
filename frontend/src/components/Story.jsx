@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 
 import { useStorySession } from '../hooks/useStorySession'
 import { stripChoiceMarkup } from '../utils/storyText'
+import { fetchStorySnapshot } from '../utils/storyApi'
 
 import './Story.css'
 
-export default function Story({ session, onExit }) {
-  const { choices, error, makeChoice, segments, streaming, title } = useStorySession(session)
+export default function Story({ session, onExit, onSnapshot }) {
+  const { choices, error, makeChoice, saveVersion, segments, streaming, title } = useStorySession(session)
   const bottomRef = useRef(null)
   const [direction, setDirection] = useState('')
   const visibleSegments = segments
@@ -21,6 +22,35 @@ export default function Story({ session, onExit }) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [segments, streaming])
+
+  useEffect(() => {
+    if (!onSnapshot || saveVersion === 0) return
+
+    let cancelled = false
+
+    async function syncSnapshot() {
+      try {
+        const snapshot = await fetchStorySnapshot(session.sessionId)
+        if (!cancelled) {
+          onSnapshot({
+            ...snapshot,
+            savedChoices: choices,
+            storyId: session.storyId || snapshot.session_id,
+            savedSegments: segments,
+            title,
+          })
+        }
+      } catch (err) {
+        console.error('Failed to sync story snapshot', err)
+      }
+    }
+
+    syncSnapshot()
+
+    return () => {
+      cancelled = true
+    }
+  }, [choices, onSnapshot, saveVersion, segments, session.sessionId, session.storyId, title])
 
   function submitDirection(event) {
     event.preventDefault()

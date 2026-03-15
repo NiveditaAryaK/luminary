@@ -3,16 +3,23 @@ import { useEffect, useRef, useState } from 'react'
 import { parseChoices } from '../utils/storyChoices'
 
 export function useStorySession(session) {
-  const [segments, setSegments] = useState([])
-  const [choices, setChoices] = useState([])
+  const [segments, setSegments] = useState(session.savedSegments || [])
+  const [choices, setChoices] = useState(session.savedChoices || [])
   const [streaming, setStreaming] = useState(false)
   const [title, setTitle] = useState(session.title || 'Your Story')
   const [error, setError] = useState('')
+  const [saveVersion, setSaveVersion] = useState(0)
   const wsRef = useRef(null)
   const requestRef = useRef(0)
 
   useEffect(() => {
-    startStory()
+    setSegments(session.savedSegments || [])
+    setTitle(session.title || 'Your Story')
+    setChoices(session.savedChoices || [])
+    setError('')
+    if (session.autoStart !== false) {
+      startStory()
+    }
     return () => wsRef.current?.close()
   }, [session.sessionId])
 
@@ -66,6 +73,7 @@ export function useStorySession(session) {
           const parsed = parseChoices(fullText)
           if (parsed.length) setChoices(parsed)
           setStreaming(false)
+          setSaveVersion((version) => version + 1)
           closedIntentionally = true
           ws.close()
         }
@@ -137,6 +145,7 @@ export function useStorySession(session) {
     choices,
     error,
     makeChoice,
+    saveVersion,
     segments,
     streaming,
     title,

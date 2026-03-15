@@ -39,6 +39,31 @@ class StoryService:
     def get_session(self, sid: str):
         return self.sessions.get(sid)
 
+    def get_snapshot(self, sid: str):
+        session = self.sessions.get(sid)
+        if not session:
+            return None
+        return {
+            "session_id": sid,
+            "title": session["title"],
+            "genre": session["genre"],
+            "premise": session["premise"],
+            "history": session["history"],
+            "turns": session["turns"],
+        }
+
+    def restore_story(self, title: str, genre: str, premise: str, history: list[dict], turns: int):
+        sid = str(uuid.uuid4())
+        self.sessions[sid] = {
+            "genre": genre,
+            "premise": premise,
+            "title": title,
+            "history": history or [],
+            "turns": turns or 0,
+        }
+        logger.info("Restored story session_id={} title='{}' turns={}", sid, title, turns)
+        return {"session_id": sid, "title": title, "genre": genre, "premise": premise, "turns": turns}
+
     async def run_turn(self, session: dict, choice: str):
         session["turns"] += 1
         if session["turns"] == 1:

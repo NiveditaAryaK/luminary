@@ -9,7 +9,7 @@ from loguru import logger
 
 from config import PORT
 from gemini_utils import format_model_error
-from schemas import CreateReq
+from schemas import CreateReq, RestoreReq
 from story_service import StoryService
 
 client = None
@@ -54,6 +54,29 @@ async def create(req: CreateReq):
 @app.post("/api/story/create")
 async def api_create(req: CreateReq):
     return await create(req)
+
+@app.get("/story/{sid}")
+def get_story_snapshot(sid: str):
+    snapshot = story_service.get_snapshot(sid)
+    if not snapshot:
+      raise HTTPException(status_code=404, detail="Session not found")
+    return snapshot
+
+@app.get("/api/story/{sid}")
+def api_get_story_snapshot(sid: str):
+    return get_story_snapshot(sid)
+
+@app.post("/story/restore")
+async def restore_story(req: RestoreReq):
+    try:
+        return story_service.restore_story(req.title, req.genre, req.premise, req.history, req.turns)
+    except Exception as exc:
+        logger.exception("Story restore failed: {}", exc)
+        raise HTTPException(status_code=500, detail="Failed to restore story.") from exc
+
+@app.post("/api/story/restore")
+async def api_restore_story(req: RestoreReq):
+    return await restore_story(req)
 
 @app.websocket("/ws/{sid}")
 async def ws_story(websocket: WebSocket, sid: str):

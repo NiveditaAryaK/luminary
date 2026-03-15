@@ -6,3 +6,5 @@ frontend/dist/
 *.egg-info/
 .DS_Store
 env
+frontend/.env.local
+.env.local
