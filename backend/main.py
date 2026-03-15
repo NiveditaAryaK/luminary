@@ -146,6 +146,7 @@ async def ws_story(websocket: WebSocket, sid: str):
                 result = await story_service.run_turn(session, choice, director_mode)
                 for event in result["events"]:
                     await websocket.send_json(event)
+                await websocket.send_json({"type":"choices","choices": result.get("choices", [])})
                 await websocket.send_json({"type":"director_mode","content": result.get("director_mode", session.director_mode)})
                 await websocket.send_json({"type":"memory","items": result.get("memory", [])})
                 await websocket.send_json({"type":"storyboard","items": result.get("storyboard", [])})

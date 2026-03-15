@@ -5,16 +5,42 @@ import { useAuth } from './hooks/useAuth'
 import { saveStorySnapshot, subscribeToStories } from './lib/storyStore'
 import { restoreStorySession } from './utils/storyApi'
 
+const STORIES_CACHE_KEY = 'luminary_saved_stories'
+const SESSION_CACHE_KEY = 'luminary_active_session'
+
 export default function App() {
-  const [session, setSession] = useState(null)
-  const [stories, setStories] = useState([])
+  const [session, setSession] = useState(() => {
+    try {
+      return JSON.parse(window.sessionStorage.getItem(SESSION_CACHE_KEY) || 'null')
+    } catch {
+      return null
+    }
+  })
+  const [stories, setStories] = useState(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem(STORIES_CACHE_KEY) || '[]')
+    } catch {
+      return []
+    }
+  })
   const [resumeError, setResumeError] = useState('')
   const { isFirebaseConfigured, logout, ready, signInWithGoogle, user } = useAuth()
 
   useEffect(() => {
     if (!isFirebaseConfigured || !user?.uid) return
-    return subscribeToStories(user.uid, setStories)
+    return subscribeToStories(user.uid, (nextStories) => {
+      setStories(nextStories)
+      window.localStorage.setItem(STORIES_CACHE_KEY, JSON.stringify(nextStories))
+    })
   }, [isFirebaseConfigured, user?.uid])
+
+  useEffect(() => {
+    if (session) {
+      window.sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(session))
+      return
+    }
+    window.sessionStorage.removeItem(SESSION_CACHE_KEY)
+  }, [session])
 
   async function handleSnapshot(snapshot) {
     if (!isFirebaseConfigured || !user?.uid || !snapshot?.storyId) return

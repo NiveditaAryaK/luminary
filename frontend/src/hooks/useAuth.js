@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
+  browserLocalPersistence,
   onAuthStateChanged,
+  setPersistence,
   signInAnonymously,
   signInWithPopup,
   signOut,
@@ -14,6 +16,10 @@ export function useAuth() {
 
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) return
+
+    setPersistence(auth, browserLocalPersistence).catch((error) => {
+      console.error('Failed to set auth persistence', error)
+    })
 
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
       if (nextUser) {

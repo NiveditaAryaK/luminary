@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { parseChoices } from '../utils/storyChoices'
+function getWebSocketBaseUrl() {
+  const configuredBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '')
+  if (configuredBase) {
+    return configuredBase.replace(/^http/i, 'ws')
+  }
+
+  if (import.meta.env.DEV) {
+    return 'ws://127.0.0.1:8080'
+  }
+
+  return `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
+}
 
 export function useStorySession(session) {
   const [segments, setSegments] = useState(session.savedSegments || [])
@@ -19,11 +30,17 @@ export function useStorySession(session) {
   const streamBufferRef = useRef('')
   const fullTextRef = useRef('')
   const receivedPayloadRef = useRef(false)
+  const hasUsableContentRef = useRef(Boolean((session.savedSegments || []).length || (session.savedChoices || []).length))
+  const hasOpenedRef = useRef(false)
   const pingTimerRef = useRef(null)
 
   useEffect(() => {
     activeSessionRef.current = session.sessionId
   }, [session.sessionId])
+
+  useEffect(() => {
+    hasUsableContentRef.current = segments.length > 0 || choices.length > 0
+  }, [choices.length, segments.length])
 
   useEffect(() => {
     setSegments(session.savedSegments || [])
@@ -36,6 +53,8 @@ export function useStorySession(session) {
     streamBufferRef.current = ''
     fullTextRef.current = ''
     receivedPayloadRef.current = false
+    hasUsableContentRef.current = Boolean((session.savedSegments || []).length || (session.savedChoices || []).length)
+    hasOpenedRef.current = false
     pendingInputsRef.current = []
     closeSocket()
     if (session.autoStart !== false) {
@@ -74,6 +93,7 @@ export function useStorySession(session) {
   function handleMessage(msg) {
     if (msg.type === 'text') {
       receivedPayloadRef.current = true
+      hasUsableContentRef.current = true
       streamBufferRef.current += msg.content
       fullTextRef.current += msg.content
       setSegments((current) => {
@@ -88,6 +108,7 @@ export function useStorySession(session) {
 
     if (msg.type === 'image') {
       receivedPayloadRef.current = true
+      hasUsableContentRef.current = true
       streamBufferRef.current = ''
       setSegments((current) => [
         ...current,
@@ -101,10 +122,6 @@ export function useStorySession(session) {
         setStreaming(true)
       }
       if (msg.content === 'complete') {
-        const parsed = parseChoices(fullTextRef.current)
-        if (parsed.length) {
-          setChoices(parsed)
-        }
         setStreaming(false)
         setSaveVersion((version) => version + 1)
         streamBufferRef.current = ''
@@ -115,6 +132,7 @@ export function useStorySession(session) {
 
     if (msg.type === 'choices') {
       receivedPayloadRef.current = true
+      hasUsableContentRef.current = true
       setChoices(msg.choices || [])
       setStreaming(false)
       return
@@ -166,10 +184,10 @@ export function useStorySession(session) {
       return current
     }
 
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${location.host}/ws/${session.sessionId}`)
+    const ws = new WebSocket(`${getWebSocketBaseUrl()}/ws/${session.sessionId}`)
     wsRef.current = ws
     closedByAppRef.current = false
+    hasOpenedRef.current = false
 
     ws.onmessage = (e) => {
       if (activeSessionRef.current !== session.sessionId || wsRef.current !== ws) return
@@ -179,6 +197,7 @@ export function useStorySession(session) {
 
     ws.onopen = () => {
       if (activeSessionRef.current !== session.sessionId || wsRef.current !== ws) return
+      hasOpenedRef.current = true
       clearPingTimer()
       pingTimerRef.current = window.setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -190,7 +209,7 @@ export function useStorySession(session) {
 
     ws.onerror = () => {
       if (activeSessionRef.current !== session.sessionId || wsRef.current !== ws) return
-      if (!closedByAppRef.current && !receivedPayloadRef.current) {
+      if (!closedByAppRef.current && !hasOpenedRef.current && !receivedPayloadRef.current && !hasUsableContentRef.current) {
         setError('Live story connection failed.')
       }
       setStreaming(false)
@@ -203,7 +222,7 @@ export function useStorySession(session) {
       clearPingTimer()
       if (activeSessionRef.current !== session.sessionId) return
       setStreaming(false)
-      if (!closedByAppRef.current && !receivedPayloadRef.current) {
+      if (!closedByAppRef.current && !hasOpenedRef.current && !receivedPayloadRef.current && !hasUsableContentRef.current) {
         setError('Live story connection failed.')
       }
     }
@@ -221,6 +240,7 @@ export function useStorySession(session) {
     streamBufferRef.current = ''
     fullTextRef.current = ''
     receivedPayloadRef.current = false
+    hasUsableContentRef.current = segments.length > 0 || choices.length > 0
     pendingInputsRef.current.push({ content: nextInput, directorMode })
 
     const ws = ensureWS()

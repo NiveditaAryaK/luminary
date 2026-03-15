@@ -1,21 +1,49 @@
 # Luminary
 
-Luminary is an AI-powered cinematic storytelling app that lets users create interactive stories with branching choices and generated illustrations.
+Luminary is a multimodal storytelling agent built for the Gemini Live Agent Challenge. It turns a short story brief into a live cinematic experience with generated prose, illustrations, narration, branching choices, saved sessions, and resumable story worlds.
 
-The project combines:
+## What It Does
 
-- A `React + Vite` frontend for story setup and playback
-- A `FastAPI` backend for session management and real-time story generation
-- Google Gemini models for title generation, narrative beats, and multimodal image output
+- Generates a cinematic story title and opening scene from a user prompt
+- Streams story beats over WebSockets
+- Produces scene illustrations alongside the narrative
+- Lets the user steer the story with preset choices or custom directions
+- Supports voice input for prompts and story directions
+- Supports narration playback with browser speech and optional Google Cloud Text-to-Speech
+- Saves stories to Firestore so users can resume unfinished sessions
+- Adds director modes, story memory, and a visual recap strip for continuity
 
-## Features
+## Stack
 
-- Start a story from a custom premise
-- Pick from multiple genres including fantasy, sci-fi, mystery, horror, romance, adventure, and historical
-- Receive streamed story beats over WebSockets
-- Generate scene illustrations alongside story text
-- Continue the narrative through player choices
-- Run locally in split frontend/backend mode or as a single Dockerized app
+- Frontend: React, Vite, Firebase Auth, Firestore
+- Backend: FastAPI, WebSockets, Pydantic, Loguru
+- AI: Google Gemini via `google-genai`, Google ADK
+- Voice: browser Web Speech APIs, optional Google Cloud Text-to-Speech
+
+## Architecture
+
+```text
+Browser
+  |- React + Vite UI
+  |- Firebase Auth
+  |- Firestore saved stories
+  |- Voice input / narration playback
+  |
+  -> FastAPI backend
+       |- story session orchestration
+       |- Gemini title + story + image generation
+       |- WebSocket story streaming
+       |- story restore/snapshot endpoints
+       |- optional Cloud TTS narration
+```
+
+## Key Features
+
+- `Director Modes`: cinematic, tender, suspenseful, heartbreaking, chaotic
+- `Story Memory`: pins durable facts like relationships, goals, secrets, and artifacts
+- `Story So Far`: recap strip of earlier visual beats
+- `Saved Stories`: archive and resume flow backed by Firestore
+- `Voice UX`: voice input plus narration playback
 
 ## Project Structure
 
@@ -23,150 +51,180 @@ The project combines:
 luminary/
 |-- backend/
 |   |-- main.py
-|   |-- agent.py
-|   |-- story_engine.py
-|   `-- requirements.txt
+|   |-- config.py
+|   |-- story_service.py
+|   |-- narration_service.py
+|   |-- models.py
+|   |-- schemas.py
+|   |-- requirements.txt
+|   `-- .env
 |-- frontend/
 |   |-- package.json
-|   |-- vite.config.js
+|   |-- .env.example
 |   `-- src/
+|       |-- components/
+|       |-- hooks/
+|       |-- lib/
+|       `-- utils/
+|-- firestore.rules
 `-- Dockerfile
 ```
 
-## Tech Stack
+## Required Setup
 
-- Frontend: React 18, Vite
-- Backend: FastAPI, Uvicorn, WebSockets, Pydantic
-- AI: `google-genai`, `google-adk`
-- Runtime: Node.js 20+, Python 3.12+
+### 1. Backend env
 
-## Environment Variables
-
-Create a `.env` file in `backend/` with:
+Create `backend/.env`:
 
 ```env
-GOOGLE_API_KEY=your_google_api_key_here
+GOOGLE_API_KEY=your_gemini_api_key
 PORT=8080
+GEMINI_TITLE_MODEL=gemini-2.5-flash
+GEMINI_STORY_MODEL=gemini-2.5-flash-image
+GEMINI_FALLBACK_MODEL=gemini-2.5-flash
+GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
+TTS_LANGUAGE_CODE=en-US
+TTS_DEFAULT_VOICE=en-US-Standard-F
+TTS_MAX_CHARS_PER_REQUEST=1800
+GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\service-account.json
 ```
 
 Notes:
 
-- `GOOGLE_API_KEY` is required for Gemini requests.
-- `PORT` is optional locally and defaults to `8080`.
+- `GOOGLE_API_KEY` is required for Gemini.
+- `GOOGLE_APPLICATION_CREDENTIALS` is only needed if you want Cloud TTS narration.
+- Cloud TTS also requires the Text-to-Speech API enabled and billing attached to the Google Cloud project.
+
+### 2. Frontend env
+
+Copy `frontend/.env.example` to `frontend/.env.local` and fill in your Firebase web app config:
+
+```env
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_STORAGE_BUCKET=...
+VITE_FIREBASE_MESSAGING_SENDER_ID=...
+VITE_FIREBASE_APP_ID=...
+VITE_FIREBASE_MEASUREMENT_ID=...
+```
+
+### 3. Firebase setup
+
+In Firebase console:
+
+- enable `Authentication`
+  - `Anonymous`
+  - `Google`
+- create `Cloud Firestore`
+- publish the rules from [`firestore.rules`](/c:/Users/Nived/OneDrive/Desktop/luminary/firestore.rules)
 
 ## Local Development
 
-### 1. Start the backend
+### Backend
 
-```bash
+```powershell
 cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
+py -3.13 -m pip install -r requirements.txt
+..\env\Scripts\python.exe main.py
 ```
 
-The backend will start on `http://localhost:8080`.
+Backend runs on `http://127.0.0.1:8080`.
 
-### 2. Start the frontend
+### Frontend
 
-In a second terminal:
-
-```bash
+```powershell
 cd frontend
-npm install
-npm run dev
+npm.cmd install
+npm.cmd run dev
 ```
 
-The frontend will start on `http://localhost:5173`.
+Frontend runs on `http://localhost:5173`.
 
-## Docker
+In development, the frontend talks to:
 
-Build and run the full app:
+- HTTP API through Vite proxy
+- WebSocket story stream directly at `ws://127.0.0.1:8080/ws/{session_id}`
 
-```bash
-docker build -t luminary .
-docker run --env GOOGLE_API_KEY=your_google_api_key_here -p 8080:8080 luminary
-```
+## API Overview
 
-This builds the frontend, copies the production bundle into the backend, and serves everything from the FastAPI app on `http://localhost:8080`.
+### `POST /story/create`
 
-## How It Works
+Starts a new story session.
 
-### Story creation
-
-`POST /story/create`
-
-Request body:
+Request:
 
 ```json
 {
   "genre": "fantasy",
-  "premise": "A cartographer discovers a city that appears only during eclipses."
+  "premise": "An astronomer discovers a staircase hidden inside moonlight.",
+  "director_mode": "cinematic"
 }
 ```
 
-Response:
+### `POST /story/restore`
 
-```json
-{
-  "session_id": "generated-session-id",
-  "title": "The City Beneath the Shadow",
-  "genre": "fantasy"
-}
-```
+Restores a saved story session from persisted history.
 
-### Real-time story streaming
+### `GET /story/{session_id}`
 
-After a session is created, the client connects to:
+Returns the current in-memory session snapshot.
 
-```text
-ws://localhost:8080/ws/{session_id}
-```
+### `GET /narration/voices`
 
-The websocket sends and receives JSON messages for:
+Lists available Cloud TTS voices when configured.
 
-- connection status
+### `POST /narration/speak`
+
+Synthesizes narrated audio for a story beat.
+
+### `WS /ws/{session_id}`
+
+Streams:
+
 - story text
-- generated images
-- completion state
-- user choices
+- image payloads
+- choices
+- director mode updates
+- story memory updates
+- storyboard recap updates
 
-## Backend Overview
+## Notes
 
-### `backend/main.py`
+- Story sessions are in-memory on the backend, so restarting the backend clears active runtime sessions.
+- Firestore keeps the user-facing saved archive, but restore still depends on backend restore endpoints.
+- Cloud TTS has a frontend-side usage guardrail and can fall back to browser narration automatically.
+- The frontend bundle is currently large because Firebase and narration logic are bundled together.
 
-- Loads environment variables
-- Initializes the Gemini client
-- Creates story sessions
-- Streams story beats and images over WebSockets
-- Serves static frontend assets when a production build exists
+## Docker
 
-### `backend/story_engine.py`
+The repo includes a Dockerfile, but local split frontend/backend development is the easiest path while iterating.
 
-- Contains the reusable story engine
-- Defines genres, session state, and story segments
-- Handles multimodal generation and fallback logic
+If you package for deployment, make sure the container or runtime has:
 
-### `backend/agent.py`
+- backend env vars
+- Gemini API access
+- optional Google service account credentials for Cloud TTS
 
-- Defines a Google ADK agent wrapper around the storytelling engine
-- Exposes helper tools for starting and continuing sessions
+## Troubleshooting
 
-## Development Notes
+- `Live story connection failed`
+  - make sure the backend is running on `127.0.0.1:8080`
+  - restart frontend after websocket-related changes
 
-- The backend stores story sessions in memory, so restarting the server clears active sessions.
-- The app expects Gemini access through `GOOGLE_API_KEY`.
-- Production static serving works when the frontend build is copied into `backend/static` as done in the Docker image.
+- Saved stories missing
+  - confirm Firebase Auth providers are enabled
+  - confirm Firestore rules are published
+  - confirm you are signed in with the same Firebase user
 
-## Future Improvements
+- No Cloud narration
+  - verify billing is enabled
+  - enable Cloud Text-to-Speech API
+  - set `GOOGLE_APPLICATION_CREDENTIALS`
 
-- Persistent session storage
-- Authentication and multi-user support
-- Better choice parsing and structured response handling
-- Observability, logging, and retry instrumentation
-- Deployment configuration for cloud hosting
+- Text appears but no image
+  - the backend has a fallback image generation pass, but model access/quota can still force text-only output
 
-## License
+## Commit Message
 
-Add a license file if you plan to distribute or open-source the project.
+`fix: stabilize live story flow and refresh the README for current architecture`

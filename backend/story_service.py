@@ -76,6 +76,56 @@ class StoryService:
                     return None
         return None
 
+    def _default_choices(self, session: StorySession) -> list[str]:
+        if session.genre == "romance":
+            return [
+                "Stay with the feeling and confess what you have been hiding.",
+                "Pull back and protect yourself before the moment goes too far.",
+                "Change the setting and search for a clue that reframes the relationship.",
+            ]
+        if session.genre in {"horror", "mystery"}:
+            return [
+                "Investigate the unsettling detail instead of looking away.",
+                "Retreat to safety and gather more information first.",
+                "Confront the person or force that seems to be behind this.",
+            ]
+        return [
+            "Push deeper into the unknown despite the risk.",
+            "Pause and examine the scene for a revealing detail.",
+            "Change course and test a bolder, less expected direction.",
+        ]
+
+    async def _ensure_choices(self, session: StorySession, text_context: str) -> list[str]:
+        prompt = (
+            "Read this story beat and return strict JSON with a key named choices. "
+            "choices must contain exactly 3 short, distinct next-scene options for the reader."
+            f"\nGenre: {session.genre}\nDirector mode: {session.director_mode}\n"
+            f"Scene excerpt:\n{self._json_excerpt(text_context)}"
+        )
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=FALLBACK_MODEL,
+                contents=[{"role": "user", "parts": [{"text": prompt}]}],
+                config=types.GenerateContentConfig(
+                    temperature=0.5,
+                    max_output_tokens=250,
+                    response_mime_type="application/json",
+                ),
+            )
+            payload = self._parse_json_block(self._extract_text(response)) or {}
+            choices = [
+                (choice or "").strip()
+                for choice in (payload.get("choices") or [])
+                if (choice or "").strip()
+            ]
+            if len(choices) >= 3:
+                return choices[:3]
+        except Exception as exc:
+            logger.warning("Choice generation fallback failed: {}", exc)
+
+        return self._default_choices(session)
+
     async def _refresh_story_state(self, session: StorySession, text_context: str, image_event: StoryEvent | None, choice: str):
         if not text_context.strip():
             return
@@ -285,14 +335,16 @@ class StoryService:
             )
             parts = []
             events = []
+            image_added = False
             for part in response.candidates[0].content.parts:
                 if getattr(part, "text", None):
                     events.append(StoryEvent(type="text", content=part.text))
                     parts.append({"text": part.text})
-                elif getattr(part, "inline_data", None):
+                elif getattr(part, "inline_data", None) and not image_added:
                     img = base64.b64encode(part.inline_data.data).decode()
                     events.append(StoryEvent(type="image", content=img, mime_type=part.inline_data.mime_type))
                     parts.append({"text": "[illustration]"})
+                    image_added = True
 
             if not any(event.type == "image" for event in events):
                 text_context = "\n\n".join(event.content for event in events if event.type == "text")
@@ -304,12 +356,14 @@ class StoryService:
             session.history.append({"role": "model", "parts": parts})
             text_context = "\n\n".join(event.content for event in events if event.type == "text")
             image_event = next((event for event in events if event.type == "image"), None)
+            choices = await self._ensure_choices(session, text_context)
             await self._refresh_story_state(session, text_context, image_event, choice)
             return {
                 "events": [
                     {"type": event.type, "content": event.content, **({"mime_type": event.mime_type} if event.mime_type else {})}
                     for event in events
                 ],
+                "choices": choices,
                 "director_mode": session.director_mode,
                 "memory": [{"label": item.label, "detail": item.detail} for item in session.memory],
                 "storyboard": [
@@ -343,12 +397,14 @@ class StoryService:
                     parts.append({"text": "[illustration]"})
                 session.history.append({"role": "model", "parts": parts})
                 image_event = next((event for event in events if event.type == "image"), None)
+                choices = await self._ensure_choices(session, fallback.text)
                 await self._refresh_story_state(session, fallback.text, image_event, choice)
                 return {
                     "events": [
                         {"type": event.type, "content": event.content, **({"mime_type": event.mime_type} if event.mime_type else {})}
                         for event in events
                     ],
+                    "choices": choices,
                     "director_mode": session.director_mode,
                     "memory": [{"label": item.label, "detail": item.detail} for item in session.memory],
                     "storyboard": [

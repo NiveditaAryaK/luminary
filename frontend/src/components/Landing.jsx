@@ -92,6 +92,10 @@ export default function Landing({ onResume, onStart, stories, user, onSignIn, on
               <span>Story room</span>
               <strong>Each choice acts like direction given to a live cinematic narrator.</strong>
             </div>
+            <div className="highlight-card archive-preview">
+              <span>Persistent worlds</span>
+              <strong>Jump back into unfinished chapters and keep building the same universe.</strong>
+            </div>
           </div>
 
           <div className="story-library">
@@ -118,31 +122,53 @@ export default function Landing({ onResume, onStart, stories, user, onSignIn, on
         <section className="landing-form">
           <div className="form-card">
             <div className="form-header">
-              <p>Story Brief</p>
-              <span>Describe the opening frame, tone, and danger.</span>
+              <div>
+                <p>Story Brief</p>
+                <span>Choose a genre, set a tone, and start the scene.</span>
+              </div>
+              <strong className="form-chip">Live multimodal</strong>
             </div>
 
-            <div className="genre-grid">
-              {GENRES.map((g) => (
-                <button key={g} className={`genre-btn ${genre === g ? 'active' : ''}`} onClick={() => setGenre(g)}>
-                  {g}
-                </button>
-              ))}
+            <div className="picker-block">
+              <div className="picker-header">
+                <span>Genre</span>
+              </div>
+              <div className="genre-grid">
+                {GENRES.map((g) => (
+                  <button key={g} className={`genre-btn ${genre === g ? 'active' : ''}`} onClick={() => setGenre(g)}>
+                    {g}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="mode-grid">
-              {DIRECTOR_MODES.map((mode) => (
-                <button key={mode} className={`genre-btn ${directorMode === mode ? 'active' : ''}`} onClick={() => setDirectorMode(mode)}>
-                  {mode}
-                </button>
-              ))}
+            <div className="picker-block">
+              <div className="picker-header tone">
+                <span>Director tone</span>
+              </div>
+              <div className="mode-grid">
+                {DIRECTOR_MODES.map((mode) => (
+                  <button
+                    key={mode}
+                    className={`mode-btn ${directorMode === mode ? 'active' : ''}`}
+                    onClick={() => setDirectorMode(mode)}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <textarea
-              placeholder="Describe the opening scene, emotional tone, visual texture, and the impossible thing that changes everything..."
-              value={premise}
-              onChange={(e) => setPremise(e.target.value)}
-            />
+            <div className="brief-area">
+              <div className="picker-header prose">
+                <span>Opening frame</span>
+              </div>
+              <textarea
+                placeholder="Describe the opening scene, emotional tone, visual texture, and the impossible thing that changes everything..."
+                value={premise}
+                onChange={(e) => setPremise(e.target.value)}
+              />
+            </div>
 
             {supported && (
               <div className="voice-tools">

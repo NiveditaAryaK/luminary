@@ -40,6 +40,9 @@ export default function Story({ session, onExit, onSnapshot }) {
     ))
     .filter((seg) => (seg.type === 'text' || seg.type === 'text_stream' ? seg.content : true))
   const turnCount = segments.filter((seg) => seg.type === 'choice').length + 1
+  const storyboardHistory = storyboard
+    .filter((beat) => beat.turn < turnCount)
+    .slice(-3)
   const latestNarration = [...visibleSegments]
     .reverse()
     .find((seg) => seg.type === 'text' || seg.type === 'text_stream')?.content || ''
@@ -233,14 +236,14 @@ export default function Story({ session, onExit, onSnapshot }) {
             )}
           </div>
 
-          {storyboard.length > 0 && (
+          {storyboardHistory.length > 0 && (
             <div className="storyboard-strip">
               <div className="choices-header">
-                <span>Visual storyboard</span>
-                <p>Every finished beat becomes a visual card you can revisit and resume from.</p>
+                <span>Story so far</span>
+                <p>Recent visual beats from earlier scenes.</p>
               </div>
               <div className="storyboard-grid">
-                {storyboard.map((beat) => (
+                {storyboardHistory.map((beat) => (
                   <article key={`${beat.turn}-${beat.caption}`} className="storyboard-card">
                     {beat.image && (
                       <img
