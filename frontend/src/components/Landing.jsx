@@ -13,7 +13,7 @@ export default function Landing({ onStart }) {
     if (!premise.trim()) { setErr('Please enter a premise.'); return }
     setLoading(true); setErr('')
     try {
-      const r = await fetch('/api/sessions', {
+      const r = await fetch('/api/story/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ genre, premise })

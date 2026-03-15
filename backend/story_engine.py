@@ -160,7 +160,7 @@ class LuminaryEngine:
         state.segments.append(seg)
         state.chat_history.append({"role": "model", "parts": [{"text": txt}]})
         yield seg
-        scene_prompt = f"Generate a cinematic illustration for: {txt[;500]} Style: {state.genre.value} genre."
+        scene_prompt = f"Generate a cinematic illustration for: {txt[:500]} Style: {state.genre.value} genre."
         try:
             img_r = await self.client.aio.models.generate_content(
                 model=GEMINI_MODEL,

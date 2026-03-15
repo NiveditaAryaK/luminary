@@ -25,11 +25,13 @@ export default function Story({ session, onExit }) {
     setStreaming(true)
     setChoices([])
     let buf = ''
+    let fullText = ''
 
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data)
       if (msg.type === 'text') {
         buf += msg.content
+        fullText += msg.content
         setSegments(s => {
           const last = s[s.length - 1]
           if (last?.type === 'text_stream') return [...s.slice(0,-1), { type:'text_stream', content: buf }]
@@ -38,6 +40,14 @@ export default function Story({ session, onExit }) {
       } else if (msg.type === 'image') {
         buf = ''
         setSegments(s => [...s, { type:'image', content: msg.content, mime: msg.mime_type }])
+      } else if (msg.type === 'status') {
+        if (msg.content === 'generating') setStreaming(true)
+        if (msg.content === 'complete') {
+          const parsed = parseChoices(fullText)
+          if (parsed.length) setChoices(parsed)
+          setStreaming(false)
+          ws.close()
+        }
       } else if (msg.type === 'choices') {
         setChoices(msg.choices || [])
         setStreaming(false)
@@ -47,9 +57,12 @@ export default function Story({ session, onExit }) {
       } else if (msg.type === 'done') {
         setStreaming(false)
         ws.close()
+      } else if (msg.type === 'system') {
+        const titleMatch = /Connected:\s*(.*)$/.exec(msg.content || '')
+        if (titleMatch?.[1]) setTitle(titleMatch[1])
       }
     }
-    ws.onopen = () => ws.send(JSON.stringify({ input }))
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'choice', content: input }))
     ws.onerror = () => setStreaming(false)
     ws.onclose = () => setStreaming(false)
   }
@@ -65,8 +78,31 @@ export default function Story({ session, onExit }) {
   }
 
   function parseChoices(text) {
-    const lines = text.split('\n').filter(l => /choice|^[A-C]\.|^[1-3]\./i.test(l) || l.includes('❧'))
-    return lines.length >= 2 ? lines : []
+    if (!text) return []
+    const picks = []
+    const direct = []
+    const re = /CHOICE_[A-C]\s*:\s*([\s\S]*?)(?=CHOICE_[A-C]\s*:|$)/gi
+    let match
+    while ((match = re.exec(text)) !== null) {
+      const cleaned = match[1].trim().replace(/^[\-\u2022]+/g, '').trim()
+      if (cleaned) direct.push(cleaned)
+    }
+    if (direct.length >= 2) return direct
+
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+    const choiceLines = lines.filter(l => /^CHOICE_[A-C]\s*:/i.test(l))
+    const scanLines = choiceLines.length ? choiceLines : lines.slice(-12)
+    for (const line of scanLines) {
+      const m1 = /^CHOICE_[A-C]\s*:\s*(.+)$/i.exec(line)
+      if (m1) { picks.push(m1[1]); continue }
+      const m2 = /^Choice\s*[A-C]\s*:\s*(.+)$/i.exec(line)
+      if (m2) { picks.push(m2[1]); continue }
+      const m3 = /^[A-C]\.\s*(.+)$/.exec(line)
+      if (m3) { picks.push(m3[1]); continue }
+      const m4 = /^[1-3]\.\s*(.+)$/.exec(line)
+      if (m4) { picks.push(m4[1]); continue }
+    }
+    return picks.length >= 2 ? picks : []
   }
 
   return (
