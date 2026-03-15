@@ -2,6 +2,7 @@ import base64
 import uuid
 
 from google.genai import types
+from loguru import logger
 
 from config import FALLBACK_MODEL, STORY_MODEL, SYSTEM_INSTRUCTION, TITLE_MODEL
 from gemini_utils import format_model_error
@@ -25,6 +26,7 @@ class StoryService:
             config=types.GenerateContentConfig(temperature=1.0, max_output_tokens=30),
         )
         title = title_resp.text.strip().strip('"')
+        logger.info("Created story session_id={} title='{}' genre='{}'", sid, title, genre)
         self.sessions[sid] = {
             "genre": genre,
             "premise": premise,
@@ -79,7 +81,8 @@ class StoryService:
                     parts.append({"text": "[illustration]"})
             session["history"].append({"role": "model", "parts": parts})
             return {"events": events, "error": None}
-        except Exception:
+        except Exception as exc:
+            logger.warning("Primary story model failed, falling back to text-only model: {}", exc)
             try:
                 fallback = await self.client.aio.models.generate_content(
                     model=FALLBACK_MODEL,
@@ -93,4 +96,5 @@ class StoryService:
                 session["history"].append({"role": "model", "parts": [{"text": fallback.text}]})
                 return {"events": [{"type": "text", "content": fallback.text}], "error": None}
             except Exception as exc:
+                logger.exception("Fallback story generation failed: {}", exc)
                 return {"events": [], "error": format_model_error(exc)}
