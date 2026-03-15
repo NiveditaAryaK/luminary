@@ -1,0 +1,134 @@
+import { useEffect, useRef, useState } from 'react'
+
+import { parseChoices } from '../utils/storyChoices'
+
+export function useStorySession(session) {
+  const [segments, setSegments] = useState([])
+  const [choices, setChoices] = useState([])
+  const [streaming, setStreaming] = useState(false)
+  const [title, setTitle] = useState(session.title || 'Your Story')
+  const [error, setError] = useState('')
+  const wsRef = useRef(null)
+
+  useEffect(() => {
+    startStory()
+    return () => wsRef.current?.close()
+  }, [session.sessionId])
+
+  function connectWS(input) {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(`${proto}://${location.host}/ws/${session.sessionId}`)
+    wsRef.current = ws
+
+    setStreaming(true)
+    setChoices([])
+    setError('')
+
+    let buf = ''
+    let fullText = ''
+    let receivedPayload = false
+    let closedIntentionally = false
+
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data)
+
+      if (msg.type === 'text') {
+        receivedPayload = true
+        buf += msg.content
+        fullText += msg.content
+        setSegments((current) => {
+          const last = current[current.length - 1]
+          if (last?.type === 'text_stream') {
+            return [...current.slice(0, -1), { type: 'text_stream', content: buf }]
+          }
+          return [...current, { type: 'text_stream', content: buf }]
+        })
+        return
+      }
+
+      if (msg.type === 'image') {
+        receivedPayload = true
+        buf = ''
+        setSegments((current) => [
+          ...current,
+          { type: 'image', content: msg.content, mime: msg.mime_type },
+        ])
+        return
+      }
+
+      if (msg.type === 'status') {
+        if (msg.content === 'generating') setStreaming(true)
+        if (msg.content === 'complete') {
+          const parsed = parseChoices(fullText)
+          if (parsed.length) setChoices(parsed)
+          setStreaming(false)
+          closedIntentionally = true
+          ws.close()
+        }
+        return
+      }
+
+      if (msg.type === 'choices') {
+        receivedPayload = true
+        setChoices(msg.choices || [])
+        setStreaming(false)
+        closedIntentionally = true
+        ws.close()
+        return
+      }
+
+      if (msg.type === 'title') {
+        setTitle(msg.content)
+        return
+      }
+
+      if (msg.type === 'done') {
+        setStreaming(false)
+        closedIntentionally = true
+        ws.close()
+        return
+      }
+
+      if (msg.type === 'system') {
+        const titleMatch = /Connected:\s*(.*)$/.exec(msg.content || '')
+        if (titleMatch?.[1]) setTitle(titleMatch[1])
+        return
+      }
+
+      if (msg.type === 'error') {
+        setError(msg.content || 'Story generation failed.')
+        setStreaming(false)
+        closedIntentionally = true
+        ws.close()
+      }
+    }
+
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'choice', content: input }))
+    ws.onerror = () => {
+      if (!closedIntentionally && !receivedPayload) {
+        setError('Live story connection failed.')
+      }
+      setStreaming(false)
+    }
+    ws.onclose = () => setStreaming(false)
+  }
+
+  function startStory() {
+    setSegments([])
+    connectWS(session.premise)
+  }
+
+  function makeChoice(choice) {
+    setSegments((current) => [...current, { type: 'choice', content: choice }])
+    connectWS(choice)
+  }
+
+  return {
+    choices,
+    error,
+    makeChoice,
+    segments,
+    streaming,
+    title,
+  }
+}
