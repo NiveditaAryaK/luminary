@@ -3,6 +3,7 @@ import { useSpeechInput } from '../hooks/useSpeechInput'
 import './Landing.css'
 
 const GENRES = ['fantasy', 'sci-fi', 'mystery', 'horror', 'romance', 'adventure', 'historical']
+const DIRECTOR_MODES = ['cinematic', 'tender', 'suspenseful', 'heartbreaking', 'chaotic']
 const PROMPTS = [
   'An astronomer discovers a staircase hidden inside moonlight.',
   'A detective wakes up wearing someone else\'s scars.',
@@ -12,6 +13,7 @@ const PROMPTS = [
 export default function Landing({ onResume, onStart, stories, user, onSignIn, onSignOut, persistenceReady, resumeError }) {
   const [genre, setGenre] = useState('fantasy')
   const [premise, setPremise] = useState('')
+  const [directorMode, setDirectorMode] = useState('cinematic')
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
   const { isListening, startListening, stopListening, supported } = useSpeechInput({
@@ -31,13 +33,14 @@ export default function Landing({ onResume, onStart, stories, user, onSignIn, on
       const r = await fetch('/api/story/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ genre, premise }),
+        body: JSON.stringify({ director_mode: directorMode, genre, premise }),
       })
       const data = await r.json().catch(() => ({}))
 
       if (data.session_id) {
         onStart({
           autoStart: true,
+          directorMode,
           genre,
           premise,
           sessionId: data.session_id,
@@ -103,6 +106,7 @@ export default function Landing({ onResume, onStart, stories, user, onSignIn, on
                   <button key={story.id} className="library-card" onClick={() => onResume(story)}>
                     <strong>{story.title || 'Untitled story'}</strong>
                     <span>{story.genre}</span>
+                    <em>{story.directorMode || 'cinematic'} mode</em>
                     <p>{story.premise}</p>
                   </button>
                 ))
@@ -122,6 +126,14 @@ export default function Landing({ onResume, onStart, stories, user, onSignIn, on
               {GENRES.map((g) => (
                 <button key={g} className={`genre-btn ${genre === g ? 'active' : ''}`} onClick={() => setGenre(g)}>
                   {g}
+                </button>
+              ))}
+            </div>
+
+            <div className="mode-grid">
+              {DIRECTOR_MODES.map((mode) => (
+                <button key={mode} className={`genre-btn ${directorMode === mode ? 'active' : ''}`} onClick={() => setDirectorMode(mode)}>
+                  {mode}
                 </button>
               ))}
             </div>

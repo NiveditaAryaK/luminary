@@ -8,8 +8,28 @@ import { fetchStorySnapshot } from '../utils/storyApi'
 
 import './Story.css'
 
+const DIRECTOR_MODES = [
+  { id: 'cinematic', label: 'Cinematic' },
+  { id: 'tender', label: 'Tender' },
+  { id: 'suspenseful', label: 'Suspenseful' },
+  { id: 'heartbreaking', label: 'Heartbreaking' },
+  { id: 'chaotic', label: 'Chaotic' },
+]
+
 export default function Story({ session, onExit, onSnapshot }) {
-  const { choices, error, makeChoice, saveVersion, segments, streaming, title } = useStorySession(session)
+  const {
+    choices,
+    directorMode,
+    error,
+    makeChoice,
+    memory,
+    saveVersion,
+    segments,
+    setDirectorMode,
+    storyboard,
+    streaming,
+    title,
+  } = useStorySession(session)
   const bottomRef = useRef(null)
   const [direction, setDirection] = useState('')
   const visibleSegments = segments
@@ -63,7 +83,10 @@ export default function Story({ session, onExit, onSnapshot }) {
         if (!cancelled) {
           onSnapshot({
             ...snapshot,
+            directorMode,
+            savedMemory: memory,
             savedChoices: choices,
+            savedStoryboard: storyboard,
             storyId: session.storyId || snapshot.session_id,
             savedSegments: segments,
             title,
@@ -79,7 +102,7 @@ export default function Story({ session, onExit, onSnapshot }) {
     return () => {
       cancelled = true
     }
-  }, [choices, onSnapshot, saveVersion, segments, session.sessionId, session.storyId, title])
+  }, [choices, directorMode, memory, onSnapshot, saveVersion, segments, session.sessionId, session.storyId, storyboard, title])
 
   function submitDirection(event) {
     event.preventDefault()
@@ -108,6 +131,22 @@ export default function Story({ session, onExit, onSnapshot }) {
           <div className="panel-card">
             <span>Current beat</span>
             <strong>{turnCount}</strong>
+          </div>
+          <div className="panel-card">
+            <span>Director mode</span>
+            <div className="mode-pills">
+              {DIRECTOR_MODES.map((modeOption) => (
+                <button
+                  key={modeOption.id}
+                  className={`mode-pill ${directorMode === modeOption.id ? 'active' : ''}`}
+                  type="button"
+                  onClick={() => setDirectorMode(modeOption.id)}
+                  disabled={streaming}
+                >
+                  {modeOption.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="panel-card wide">
             <span>Premise</span>
@@ -152,6 +191,19 @@ export default function Story({ session, onExit, onSnapshot }) {
               </div>
             </div>
           )}
+          <div className="panel-card">
+            <span>Story memory</span>
+            <div className="memory-stack">
+              {memory.length
+                ? memory.map((item) => (
+                  <div key={`${item.label}-${item.detail}`} className="memory-card">
+                    <strong>{item.label}</strong>
+                    <p>{item.detail}</p>
+                  </div>
+                ))
+                : <p className="memory-empty">Luminary will pin the promises, secrets, and emotional anchors it should not forget.</p>}
+            </div>
+          </div>
         </aside>
 
         <section className="story-main">
@@ -180,6 +232,31 @@ export default function Story({ session, onExit, onSnapshot }) {
               </div>
             )}
           </div>
+
+          {storyboard.length > 0 && (
+            <div className="storyboard-strip">
+              <div className="choices-header">
+                <span>Visual storyboard</span>
+                <p>Every finished beat becomes a visual card you can revisit and resume from.</p>
+              </div>
+              <div className="storyboard-grid">
+                {storyboard.map((beat) => (
+                  <article key={`${beat.turn}-${beat.caption}`} className="storyboard-card">
+                    {beat.image && (
+                      <img
+                        src={`data:${beat.mime_type};base64,${beat.image}`}
+                        alt={beat.caption || `Storyboard beat ${beat.turn}`}
+                      />
+                    )}
+                    <div className="storyboard-copy">
+                      <span>Beat {beat.turn}</span>
+                      <p>{beat.caption}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
 
           {choices.length > 0 && (
             <div className="choices-wrap">

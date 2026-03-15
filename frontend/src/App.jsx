@@ -20,10 +20,13 @@ export default function App() {
     if (!isFirebaseConfigured || !user?.uid || !snapshot?.storyId) return
     try {
       await saveStorySnapshot(user.uid, snapshot.storyId, {
+        directorMode: snapshot.directorMode,
         genre: snapshot.genre,
         history: snapshot.history,
+        memory: snapshot.savedMemory || [],
         premise: snapshot.premise,
         savedChoices: snapshot.savedChoices || [],
+        savedStoryboard: snapshot.savedStoryboard || [],
         savedSegments: snapshot.savedSegments,
         storyId: snapshot.storyId,
         title: snapshot.title,
@@ -41,10 +44,13 @@ export default function App() {
 
     try {
       await saveStorySnapshot(user.uid, nextSession.storyId, {
+        directorMode: nextSession.directorMode || 'cinematic',
         genre: nextSession.genre,
         history: [],
+        memory: [],
         premise: nextSession.premise,
         savedChoices: [],
+        savedStoryboard: [],
         savedSegments: [],
         storyId: nextSession.storyId,
         title: nextSession.title,
@@ -65,6 +71,9 @@ export default function App() {
         premise: story.premise,
         history: story.history || [],
         turns: story.turns || 0,
+        director_mode: story.directorMode || 'cinematic',
+        memory: story.memory || [],
+        storyboard: story.savedStoryboard || [],
       })
 
       const hasSavedProgress = Boolean(
@@ -77,7 +86,10 @@ export default function App() {
         autoStart: !hasSavedProgress,
         genre: restored.genre,
         premise: restored.premise,
+        directorMode: restored.director_mode || story.directorMode || 'cinematic',
+        savedMemory: restored.memory || story.memory || [],
         savedChoices: story.savedChoices || [],
+        savedStoryboard: restored.storyboard || story.savedStoryboard || [],
         savedSegments: story.savedSegments || [],
         sessionId: restored.session_id,
         storyId: story.storyId || story.id,

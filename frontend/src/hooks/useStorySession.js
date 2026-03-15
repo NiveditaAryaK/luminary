@@ -8,6 +8,9 @@ export function useStorySession(session) {
   const [streaming, setStreaming] = useState(false)
   const [title, setTitle] = useState(session.title || 'Your Story')
   const [error, setError] = useState('')
+  const [directorMode, setDirectorMode] = useState(session.directorMode || 'cinematic')
+  const [memory, setMemory] = useState(session.savedMemory || [])
+  const [storyboard, setStoryboard] = useState(session.savedStoryboard || [])
   const [saveVersion, setSaveVersion] = useState(0)
   const wsRef = useRef(null)
   const activeSessionRef = useRef(session.sessionId)
@@ -26,6 +29,9 @@ export function useStorySession(session) {
     setSegments(session.savedSegments || [])
     setTitle(session.title || 'Your Story')
     setChoices(session.savedChoices || [])
+    setDirectorMode(session.directorMode || 'cinematic')
+    setMemory(session.savedMemory || [])
+    setStoryboard(session.savedStoryboard || [])
     setError('')
     streamBufferRef.current = ''
     fullTextRef.current = ''
@@ -57,7 +63,11 @@ export function useStorySession(session) {
   function flushPendingInputs(ws) {
     while (pendingInputsRef.current.length > 0 && ws.readyState === WebSocket.OPEN) {
       const nextInput = pendingInputsRef.current.shift()
-      ws.send(JSON.stringify({ type: 'choice', content: nextInput }))
+      ws.send(JSON.stringify({
+        type: 'choice',
+        content: nextInput.content,
+        director_mode: nextInput.directorMode,
+      }))
     }
   }
 
@@ -112,6 +122,21 @@ export function useStorySession(session) {
 
     if (msg.type === 'title') {
       setTitle(msg.content)
+      return
+    }
+
+    if (msg.type === 'director_mode') {
+      setDirectorMode(msg.content || 'cinematic')
+      return
+    }
+
+    if (msg.type === 'memory') {
+      setMemory(msg.items || [])
+      return
+    }
+
+    if (msg.type === 'storyboard') {
+      setStoryboard(msg.items || [])
       return
     }
 
@@ -196,7 +221,7 @@ export function useStorySession(session) {
     streamBufferRef.current = ''
     fullTextRef.current = ''
     receivedPayloadRef.current = false
-    pendingInputsRef.current.push(nextInput)
+    pendingInputsRef.current.push({ content: nextInput, directorMode })
 
     const ws = ensureWS()
     if (ws.readyState === WebSocket.OPEN) {
@@ -218,10 +243,14 @@ export function useStorySession(session) {
 
   return {
     choices,
+    directorMode,
     error,
     makeChoice,
+    memory,
     saveVersion,
     segments,
+    setDirectorMode,
+    storyboard,
     streaming,
     title,
   }

@@ -1,11 +1,12 @@
 import base64
+import json
 
 from google.genai import types
 from loguru import logger
 
 from config import FALLBACK_MODEL, IMAGE_MODEL, STORY_MODEL, SYSTEM_INSTRUCTION, TITLE_MODEL
 from gemini_utils import format_model_error
-from models import StoryEvent, StorySession
+from models import StoryEvent, StoryMemory, StorySession, StoryboardBeat
 
 
 class StoryService:
@@ -28,6 +29,116 @@ class StoryService:
                     return part_text.strip()
 
         return ""
+
+    def _json_excerpt(self, text: str, limit: int = 1400) -> str:
+        return text[:limit].replace("\r", " ").strip()
+
+    def _build_memory_context(self, session: StorySession) -> str:
+        if not session.memory:
+            return "No locked story memory yet."
+        return "\n".join(f"- {item.label}: {item.detail}" for item in session.memory[:6])
+
+    def _build_director_prompt(self, session: StorySession, choice: str) -> str:
+        memory_context = self._build_memory_context(session)
+        if session.turns == 1:
+            return (
+                f"Begin a {session.genre} story under a {session.director_mode} director mode. "
+                f"Premise: {session.premise}. "
+                "Write a vivid opening scene with clear emotional momentum, generate a cinematic illustration, "
+                "and end with exactly 3 distinct choices."
+                f"\nLocked memory:\n{memory_context}"
+            )
+
+        return (
+            f"The reader chose: {choice}. Continue the {session.genre} story in a {session.director_mode} mode. "
+            "Show immediate consequences, reveal something that deepens the emotional stakes or world, "
+            "generate a scene illustration, and end with exactly 3 distinct choices."
+            f"\nLocked memory:\n{memory_context}"
+        )
+
+    def _parse_json_block(self, text: str) -> dict | None:
+        if not text:
+            return None
+
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`")
+            cleaned = cleaned.replace("json", "", 1).strip()
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    return json.loads(cleaned[start:end + 1])
+                except json.JSONDecodeError:
+                    return None
+        return None
+
+    async def _refresh_story_state(self, session: StorySession, text_context: str, image_event: StoryEvent | None, choice: str):
+        if not text_context.strip():
+            return
+
+        prompt = (
+            "You maintain state for an interactive cinematic story. "
+            "Return strict JSON with two keys: memory and storyboard_caption. "
+            "memory must be an array of up to 5 objects with label and detail. "
+            "Pick durable facts only: characters, promises, secrets, objects, relationships, wounds, goals. "
+            "storyboard_caption must be a short caption for the latest illustrated beat.\n"
+            f"Title: {session.title}\n"
+            f"Genre: {session.genre}\n"
+            f"Director mode: {session.director_mode}\n"
+            f"Latest direction: {choice}\n"
+            f"Latest scene excerpt:\n{self._json_excerpt(text_context)}\n"
+            f"Existing memory:\n{self._build_memory_context(session)}"
+        )
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=FALLBACK_MODEL,
+                contents=[{"role": "user", "parts": [{"text": prompt}]}],
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                    max_output_tokens=500,
+                    response_mime_type="application/json",
+                ),
+            )
+            payload = self._parse_json_block(self._extract_text(response)) or {}
+            memory_items = payload.get("memory") or []
+            if memory_items:
+                session.memory = [
+                    StoryMemory(
+                        label=(item.get("label") or "Story thread")[:40],
+                        detail=(item.get("detail") or "").strip()[:180],
+                    )
+                    for item in memory_items[:5]
+                    if item.get("detail")
+                ]
+
+            caption = (payload.get("storyboard_caption") or "").strip()
+            if not caption:
+                caption = self._json_excerpt(text_context, 120)
+            session.storyboard.append(
+                StoryboardBeat(
+                    turn=session.turns,
+                    caption=caption[:120],
+                    image=image_event.content if image_event else None,
+                    mime_type=image_event.mime_type if image_event else None,
+                )
+            )
+            session.storyboard = session.storyboard[-8:]
+        except Exception as exc:
+            logger.warning("Story state refresh failed: {}", exc)
+            session.storyboard.append(
+                StoryboardBeat(
+                    turn=session.turns,
+                    caption=self._json_excerpt(text_context, 120),
+                    image=image_event.content if image_event else None,
+                    mime_type=image_event.mime_type if image_event else None,
+                )
+            )
+            session.storyboard = session.storyboard[-8:]
 
     async def _generate_scene_image(self, session: StorySession, text_context: str) -> StoryEvent | None:
         prompt = (
@@ -62,7 +173,7 @@ class StoryService:
 
         return None
 
-    async def create_story(self, genre: str, premise: str) -> dict:
+    async def create_story(self, genre: str, premise: str, director_mode: str = "cinematic") -> dict:
         title_resp = await self.client.aio.models.generate_content(
             model=TITLE_MODEL,
             contents=[{
@@ -77,10 +188,17 @@ class StoryService:
         if not title:
             logger.warning("Title model returned no text for genre='{}'; using fallback title", genre)
             title = f"The {genre.title()} Affair"
-        session = StorySession(genre=genre, premise=premise, title=title)
+        session = StorySession(genre=genre, premise=premise, title=title, director_mode=director_mode)
         logger.info("Created story session_id={} title='{}' genre='{}'", session.session_id, title, genre)
         self.sessions[session.session_id] = session
-        return {"session_id": session.session_id, "title": title, "genre": genre}
+        return {
+            "session_id": session.session_id,
+            "title": title,
+            "genre": genre,
+            "director_mode": director_mode,
+            "memory": [],
+            "storyboard": [],
+        }
 
     def get_session(self, sid: str):
         return self.sessions.get(sid)
@@ -91,13 +209,39 @@ class StoryService:
             return None
         return session.snapshot()
 
-    def restore_story(self, title: str, genre: str, premise: str, history: list[dict], turns: int):
+    def restore_story(
+        self,
+        title: str,
+        genre: str,
+        premise: str,
+        history: list[dict],
+        turns: int,
+        director_mode: str = "cinematic",
+        memory: list[dict] | None = None,
+        storyboard: list[dict] | None = None,
+    ):
         session = StorySession(
             genre=genre,
             premise=premise,
             title=title,
             history=history or [],
             turns=turns or 0,
+            director_mode=director_mode or "cinematic",
+            memory=[
+                StoryMemory(label=item.get("label", "Story thread"), detail=item.get("detail", ""))
+                for item in (memory or [])
+                if item.get("detail")
+            ],
+            storyboard=[
+                StoryboardBeat(
+                    turn=item.get("turn", index + 1),
+                    caption=item.get("caption", ""),
+                    image=item.get("image"),
+                    mime_type=item.get("mime_type"),
+                )
+                for index, item in enumerate(storyboard or [])
+                if item.get("caption") or item.get("image")
+            ],
         )
         self.sessions[session.session_id] = session
         logger.info("Restored story session_id={} title='{}' turns={}", session.session_id, title, turns)
@@ -107,20 +251,24 @@ class StoryService:
             "genre": genre,
             "premise": premise,
             "turns": turns,
+            "director_mode": session.director_mode,
+            "memory": [{"label": item.label, "detail": item.detail} for item in session.memory],
+            "storyboard": [
+                {
+                    "turn": beat.turn,
+                    "caption": beat.caption,
+                    "image": beat.image,
+                    "mime_type": beat.mime_type,
+                }
+                for beat in session.storyboard
+            ],
         }
 
-    async def run_turn(self, session: StorySession, choice: str):
+    async def run_turn(self, session: StorySession, choice: str, director_mode: str | None = None):
+        if director_mode:
+            session.director_mode = director_mode
         session.turns += 1
-        if session.turns == 1:
-            prompt = (
-                f"Begin a {session.genre} story. Premise: {session.premise}. "
-                "Create a stunning opening scene with a generated illustration. End with 3 choices."
-            )
-        else:
-            prompt = (
-                f"The reader chose: {choice}. Continue the story, show consequences, "
-                "generate a scene illustration, end with 3 choices."
-            )
+        prompt = self._build_director_prompt(session, choice)
 
         session.history.append({"role": "user", "parts": [{"text": prompt}]})
 
@@ -154,10 +302,24 @@ class StoryService:
                     parts.append({"text": "[illustration]"})
 
             session.history.append({"role": "model", "parts": parts})
+            text_context = "\n\n".join(event.content for event in events if event.type == "text")
+            image_event = next((event for event in events if event.type == "image"), None)
+            await self._refresh_story_state(session, text_context, image_event, choice)
             return {
                 "events": [
                     {"type": event.type, "content": event.content, **({"mime_type": event.mime_type} if event.mime_type else {})}
                     for event in events
+                ],
+                "director_mode": session.director_mode,
+                "memory": [{"label": item.label, "detail": item.detail} for item in session.memory],
+                "storyboard": [
+                    {
+                        "turn": beat.turn,
+                        "caption": beat.caption,
+                        "image": beat.image,
+                        "mime_type": beat.mime_type,
+                    }
+                    for beat in session.storyboard
                 ],
                 "error": None,
             }
@@ -180,10 +342,23 @@ class StoryService:
                     events.append(generated_image)
                     parts.append({"text": "[illustration]"})
                 session.history.append({"role": "model", "parts": parts})
+                image_event = next((event for event in events if event.type == "image"), None)
+                await self._refresh_story_state(session, fallback.text, image_event, choice)
                 return {
                     "events": [
                         {"type": event.type, "content": event.content, **({"mime_type": event.mime_type} if event.mime_type else {})}
                         for event in events
+                    ],
+                    "director_mode": session.director_mode,
+                    "memory": [{"label": item.label, "detail": item.detail} for item in session.memory],
+                    "storyboard": [
+                        {
+                            "turn": beat.turn,
+                            "caption": beat.caption,
+                            "image": beat.image,
+                            "mime_type": beat.mime_type,
+                        }
+                        for beat in session.storyboard
                     ],
                     "error": None,
                 }

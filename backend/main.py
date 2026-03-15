@@ -55,7 +55,7 @@ def api_health(): return health()
 async def create(req: CreateReq):
     try:
         logger.info("Creating story session for genre='{genre}'", genre=req.genre)
-        return await story_service.create_story(req.genre, req.premise)
+        return await story_service.create_story(req.genre, req.premise, req.director_mode)
     except Exception as exc:
         logger.exception("Story creation failed: {}", exc)
         raise HTTPException(status_code=503, detail=format_model_error(exc)) from exc
@@ -78,7 +78,16 @@ def api_get_story_snapshot(sid: str):
 @app.post("/story/restore")
 async def restore_story(req: RestoreReq):
     try:
-        return story_service.restore_story(req.title, req.genre, req.premise, req.history, req.turns)
+        return story_service.restore_story(
+            req.title,
+            req.genre,
+            req.premise,
+            req.history,
+            req.turns,
+            req.director_mode,
+            req.memory,
+            req.storyboard,
+        )
     except Exception as exc:
         logger.exception("Story restore failed: {}", exc)
         raise HTTPException(status_code=500, detail="Failed to restore story.") from exc
@@ -131,11 +140,15 @@ async def ws_story(websocket: WebSocket, sid: str):
             data = await websocket.receive_json()
             if data.get("type") == "choice":
                 choice = data.get("content","")
+                director_mode = data.get("director_mode")
                 logger.info("Running story turn for session_id={} turn={} choice='{}'", sid, session.turns + 1, choice)
                 await websocket.send_json({"type":"status","content":"generating"})
-                result = await story_service.run_turn(session, choice)
+                result = await story_service.run_turn(session, choice, director_mode)
                 for event in result["events"]:
                     await websocket.send_json(event)
+                await websocket.send_json({"type":"director_mode","content": result.get("director_mode", session.director_mode)})
+                await websocket.send_json({"type":"memory","items": result.get("memory", [])})
+                await websocket.send_json({"type":"storyboard","items": result.get("storyboard", [])})
                 if result["error"]:
                     logger.error("Story turn failed for session_id={}: {}", sid, result["error"])
                     await websocket.send_json({"type":"error","content":result["error"]})

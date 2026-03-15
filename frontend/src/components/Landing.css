@@ -190,7 +190,16 @@
   color: var(--gold-light);
   text-transform: capitalize;
   font-size: 0.8rem;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.15rem;
+}
+
+.library-card em {
+  display: block;
+  color: var(--text-muted);
+  font-style: normal;
+  text-transform: capitalize;
+  font-size: 0.8rem;
+  margin-bottom: 0.45rem;
 }
 
 .library-card p,
@@ -243,6 +252,12 @@
 .genre-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
+  gap: 0.65rem;
+}
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
   gap: 0.65rem;
 }
 
@@ -373,6 +388,10 @@ textarea:focus {
   }
 
   .genre-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .mode-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 

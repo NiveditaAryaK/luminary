@@ -1,9 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CreateReq(BaseModel):
     genre: str
     premise: str
+    director_mode: str = "cinematic"
 
 
 class RestoreReq(BaseModel):
@@ -12,6 +13,9 @@ class RestoreReq(BaseModel):
     premise: str
     history: list[dict]
     turns: int = 0
+    director_mode: str = "cinematic"
+    memory: list[dict] = Field(default_factory=list)
+    storyboard: list[dict] = Field(default_factory=list)
 
 
 class NarrationReq(BaseModel):
