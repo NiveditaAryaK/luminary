@@ -1,7 +1,12 @@
 import { useState } from 'react'
 import './Landing.css'
 
-const GENRES = ['fantasy','sci-fi','mystery','horror','romance','adventure','historical']
+const GENRES = ['fantasy', 'sci-fi', 'mystery', 'horror', 'romance', 'adventure', 'historical']
+const PROMPTS = [
+  'An astronomer discovers a staircase hidden inside moonlight.',
+  'A detective wakes up wearing someone else\'s scars.',
+  'A ruined kingdom broadcasts warnings through broken radios.',
+]
 
 export default function Landing({ onStart }) {
   const [genre, setGenre] = useState('fantasy')
@@ -10,40 +15,97 @@ export default function Landing({ onStart }) {
   const [err, setErr] = useState('')
 
   async function handleStart() {
-    if (!premise.trim()) { setErr('Please enter a premise.'); return }
-    setLoading(true); setErr('')
+    if (!premise.trim()) {
+      setErr('Please enter a premise.')
+      return
+    }
+
+    setLoading(true)
+    setErr('')
+
     try {
       const r = await fetch('/api/story/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ genre, premise })
+        body: JSON.stringify({ genre, premise }),
       })
       const data = await r.json().catch(() => ({}))
-      if (data.session_id) onStart({ sessionId: data.session_id, genre, premise, title: data.title })
-      else setErr(data.detail || (r.ok ? 'Failed to start story.' : `Request failed (${r.status}).`))
-    } catch(e) { setErr('Connection error. Please try again.') }
+
+      if (data.session_id) {
+        onStart({ sessionId: data.session_id, genre, premise, title: data.title })
+      } else {
+        setErr(data.detail || (r.ok ? 'Failed to start story.' : `Request failed (${r.status}).`))
+      }
+    } catch {
+      setErr('Connection error. Please try again.')
+    }
+
     setLoading(false)
   }
 
   return (
     <div className="landing">
-      <h1 className="landing-title">Luminary</h1>
-      <p className="landing-subtitle">AI Cinematic Interactive Storytelling</p>
-      <div className="landing-form">
-        <div className="genre-grid">
-          {GENRES.map(g => (
-            <button key={g} className={`genre-btn ${genre===g?'active':''}`} onClick={() => setGenre(g)}>{g}</button>
-          ))}
-        </div>
-        <textarea
-          placeholder="Describe your story premise... (e.g. A detective wakes up with no memory in a city that doesn't exist)"
-          value={premise}
-          onChange={e => setPremise(e.target.value)}
-        />
-        {err && <p className="err">{err}</p>}
-        <button className="begin-btn" onClick={handleStart} disabled={loading}>
-          {loading ? 'Conjuring your story...' : 'Begin the Story ✦'}
-        </button>
+      <div className="landing-backdrop" />
+      <div className="landing-shell">
+        <section className="landing-copy">
+          <p className="eyebrow">Creative Storyteller Agent</p>
+          <h1 className="landing-title">Luminary</h1>
+          <p className="landing-subtitle">
+            Direct a living story world that answers with prose, scene art, and branching choices in one cinematic flow.
+          </p>
+
+          <div className="landing-highlights">
+            <div className="highlight-card">
+              <span>Interleaved output</span>
+              <strong>Text, imagery, and branching decisions arrive as one staged response.</strong>
+            </div>
+            <div className="highlight-card">
+              <span>Genre steering</span>
+              <strong>Push each session toward dread, wonder, intimacy, or impossible mystery.</strong>
+            </div>
+            <div className="highlight-card">
+              <span>Story room</span>
+              <strong>Each choice acts like direction given to a live cinematic narrator.</strong>
+            </div>
+          </div>
+        </section>
+
+        <section className="landing-form">
+          <div className="form-card">
+            <div className="form-header">
+              <p>Story Brief</p>
+              <span>Describe the opening frame, tone, and danger.</span>
+            </div>
+
+            <div className="genre-grid">
+              {GENRES.map((g) => (
+                <button key={g} className={`genre-btn ${genre === g ? 'active' : ''}`} onClick={() => setGenre(g)}>
+                  {g}
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              placeholder="Describe the opening scene, emotional tone, visual texture, and the impossible thing that changes everything..."
+              value={premise}
+              onChange={(e) => setPremise(e.target.value)}
+            />
+
+            <div className="prompt-bank">
+              {PROMPTS.map((prompt) => (
+                <button key={prompt} className="prompt-chip" onClick={() => setPremise(prompt)}>
+                  {prompt}
+                </button>
+              ))}
+            </div>
+
+            {err && <p className="err">{err}</p>}
+
+            <button className="begin-btn" onClick={handleStart} disabled={loading}>
+              {loading ? 'Summoning your opening scene...' : 'Open the Story Room'}
+            </button>
+          </div>
+        </section>
       </div>
     </div>
   )

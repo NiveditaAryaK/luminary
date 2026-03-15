@@ -1,16 +1,36 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap');
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
 :root {
-  --bg: #0a0a14;
-  --gold: #c9a84c;
-  --gold-light: #e8c97a;
-  --text: #e8e0d0;
-  --text-muted: #8a8070;
-  --surface: #12121e;
-  --border: rgba(201,168,76,0.2);
+  --bg: #090911;
+  --gold: #d3a048;
+  --gold-light: #f7d389;
+  --text: #f1eadf;
+  --text-muted: #9f988a;
+  --surface: #121420;
+  --border: rgba(211, 160, 72, 0.2);
 }
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: 'Inter', sans-serif;
+  font-family: 'Manrope', sans-serif;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(circle at top, rgba(211, 160, 72, 0.1), transparent 24%),
+    linear-gradient(180deg, #0a0b12 0%, #090911 100%);
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+#root {
   min-height: 100vh;
 }
