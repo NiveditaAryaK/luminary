@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { useStorySession } from '../hooks/useStorySession'
 import { stripChoiceMarkup } from '../utils/storyText'
@@ -8,6 +8,7 @@ import './Story.css'
 export default function Story({ session, onExit }) {
   const { choices, error, makeChoice, segments, streaming, title } = useStorySession(session)
   const bottomRef = useRef(null)
+  const [direction, setDirection] = useState('')
   const visibleSegments = segments
     .map((seg) => (
       seg.type === 'text' || seg.type === 'text_stream'
@@ -20,6 +21,14 @@ export default function Story({ session, onExit }) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [segments, streaming])
+
+  function submitDirection(event) {
+    event.preventDefault()
+    const nextDirection = direction.trim()
+    if (!nextDirection || streaming) return
+    makeChoice(nextDirection)
+    setDirection('')
+  }
 
   return (
     <div className="story-page">
@@ -94,6 +103,25 @@ export default function Story({ session, onExit }) {
               </div>
             </div>
           )}
+
+          <form className="director-box" onSubmit={submitDirection}>
+            <div className="choices-header">
+              <span>Direct the next scene</span>
+              <p>Type your own instruction if you want to steer the story beyond the suggested branches.</p>
+            </div>
+            <div className="director-row">
+              <textarea
+                className="director-input"
+                placeholder="Example: Follow the staircase into the moonlight, but keep the telescope recording everything."
+                value={direction}
+                onChange={(e) => setDirection(e.target.value)}
+                disabled={streaming}
+              />
+              <button className="director-submit" type="submit" disabled={streaming || !direction.trim()}>
+                Send Direction
+              </button>
+            </div>
+          </form>
         </section>
       </div>
       <div ref={bottomRef} />

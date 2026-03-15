@@ -9,6 +9,7 @@ export function useStorySession(session) {
   const [title, setTitle] = useState(session.title || 'Your Story')
   const [error, setError] = useState('')
   const wsRef = useRef(null)
+  const requestRef = useRef(0)
 
   useEffect(() => {
     startStory()
@@ -18,6 +19,7 @@ export function useStorySession(session) {
   function connectWS(input) {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(`${proto}://${location.host}/ws/${session.sessionId}`)
+    const requestId = ++requestRef.current
     wsRef.current = ws
 
     setStreaming(true)
@@ -28,8 +30,10 @@ export function useStorySession(session) {
     let fullText = ''
     let receivedPayload = false
     let closedIntentionally = false
+    const isActiveSocket = () => wsRef.current === ws && requestRef.current === requestId
 
     ws.onmessage = (e) => {
+      if (!isActiveSocket()) return
       const msg = JSON.parse(e.data)
 
       if (msg.type === 'text') {
@@ -105,12 +109,16 @@ export function useStorySession(session) {
 
     ws.onopen = () => ws.send(JSON.stringify({ type: 'choice', content: input }))
     ws.onerror = () => {
+      if (!isActiveSocket()) return
       if (!closedIntentionally && !receivedPayload) {
         setError('Live story connection failed.')
       }
       setStreaming(false)
     }
-    ws.onclose = () => setStreaming(false)
+    ws.onclose = () => {
+      if (!isActiveSocket()) return
+      setStreaming(false)
+    }
   }
 
   function startStory() {
@@ -119,8 +127,10 @@ export function useStorySession(session) {
   }
 
   function makeChoice(choice) {
-    setSegments((current) => [...current, { type: 'choice', content: choice }])
-    connectWS(choice)
+    const nextChoice = choice?.trim()
+    if (!nextChoice) return
+    setSegments((current) => [...current, { type: 'choice', content: nextChoice }])
+    connectWS(nextChoice)
   }
 
   return {
