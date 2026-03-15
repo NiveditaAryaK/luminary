@@ -1,0 +1,16 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0a0a14;
+  --gold: #c9a84c;
+  --gold-light: #e8c97a;
+  --text: #e8e0d0;
+  --text-muted: #8a8070;
+  --surface: #12121e;
+  --border: rgba(201,168,76,0.2);
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+}
