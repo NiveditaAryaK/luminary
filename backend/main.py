@@ -1,5 +1,5 @@
-
 import os
+import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import JSONResponse
@@ -26,10 +26,15 @@ async def lifespan(app):
         os.path.join(os.path.dirname(__file__), "server.log"),
         level="INFO",
         rotation="5 MB",
-        backtrace=True,
-        diagnose=True,
+        backtrace=False,
+        diagnose=False,
     )
-    logger.add(lambda msg: print(msg, end=""), level="INFO")
+    logger.add(
+        sys.stdout,
+        level="INFO",
+        backtrace=False,
+        diagnose=False,
+    )
     client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     story_service = StoryService(client)
     try:

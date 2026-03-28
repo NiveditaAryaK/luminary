@@ -9,3 +9,5 @@ env
 frontend/.env.local
 .env.local
 backend/*.json
+*.log
+backend/server.log
