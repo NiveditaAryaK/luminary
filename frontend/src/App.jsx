@@ -55,6 +55,7 @@ export default function App() {
         savedStoryboard: snapshot.savedStoryboard || [],
         savedSegments: snapshot.savedSegments,
         storyId: snapshot.storyId,
+        styleBible: snapshot.style_bible || '',
         title: snapshot.title,
         turns: snapshot.turns,
       })
@@ -100,6 +101,7 @@ export default function App() {
         director_mode: story.directorMode || 'cinematic',
         memory: story.memory || [],
         storyboard: story.savedStoryboard || [],
+        style_bible: story.styleBible || '',
       })
 
       const hasSavedProgress = Boolean(

@@ -92,6 +92,7 @@ async def restore_story(req: RestoreReq):
             req.director_mode,
             req.memory,
             req.storyboard,
+            req.style_bible,
         )
     except Exception as exc:
         logger.exception("Story restore failed: {}", exc)
