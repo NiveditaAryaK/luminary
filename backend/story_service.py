@@ -5,10 +5,30 @@ import json
 from google.genai import types
 from loguru import logger
 
-from config import FALLBACK_MODEL, STORY_MODEL, SYSTEM_INSTRUCTION, TITLE_MODEL
+from config import (
+    FALLBACK_MODEL,
+    NARRATION_BEAT_THRESHOLD,
+    STORY_MODEL,
+    SYSTEM_INSTRUCTION,
+    TITLE_MODEL,
+)
 from gemini_utils import format_model_error
 from models import StoryEvent, StoryMemory, StorySession, StoryboardBeat
 from visual_engine import VisualEngine
+
+
+NARRATION_BEAT_PROMPT = (
+    "You listen to a live storyteller and decide when enough of a scene has been described to illustrate it. "
+    "Return strict JSON with keys: beat_complete, scene_prompt, caption, memory. "
+    "beat_complete: true only when the narration so far paints one coherent, visualizable scene "
+    "(a place, characters or subjects, and an action or mood). "
+    "scene_prompt: one vivid paragraph an illustrator can paint, grounded ONLY in what was narrated. "
+    "caption: a short storyboard caption (max 12 words). "
+    "memory: up to 5 objects with label and detail — durable story facts only "
+    "(characters, promises, secrets, objects, relationships, wounds, goals), merging the existing memory "
+    "with anything new from the narration.\n"
+    "Title: {title}\nGenre: {genre}\nExisting memory:\n{memory}\nNarration so far:\n{narration}"
+)
 
 
 class StoryService:
@@ -200,6 +220,115 @@ class StoryService:
 
     async def _generate_scene_image(self, session: StorySession, text_context: str) -> StoryEvent | None:
         return await self.visuals.generate_scene(session, text_context)
+
+    async def _detect_narration_beat(self, session: StorySession, narration: str) -> dict:
+        prompt = NARRATION_BEAT_PROMPT.format(
+            title=session.title,
+            genre=session.genre,
+            memory=self._build_memory_context(session),
+            narration=self._json_excerpt(narration, 2000),
+        )
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=FALLBACK_MODEL,
+                contents=[{"role": "user", "parts": [{"text": prompt}]}],
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=600,
+                    response_mime_type="application/json",
+                ),
+            )
+            return self._parse_json_block(self._extract_text(response)) or {}
+        except Exception as exc:
+            logger.warning("Narration beat detection failed: {}", exc)
+            return {}
+
+    async def run_narration_beat(self, session: StorySession, emit, force: bool = False) -> bool:
+        """Illustrate the pending narration buffer once it forms a complete beat.
+
+        `emit` is an async callback receiving websocket-ready event dicts.
+        Returns True when a beat was illustrated. The per-session lock keeps
+        overlapping narration chunks from triggering concurrent generations;
+        chunks arriving mid-generation stay in the buffer for the next check.
+        """
+        if session.narration_lock.locked() and not force:
+            return False
+        async with session.narration_lock:
+            captured = session.narration_pending
+            narration = captured.strip()
+            if not narration:
+                return False
+            if not force and len(narration) < NARRATION_BEAT_THRESHOLD:
+                return False
+
+            payload = await self._detect_narration_beat(session, narration)
+            if not force and not payload.get("beat_complete"):
+                return False
+
+            # Consume only what we captured — chunks appended while the model
+            # calls below run remain buffered for the next beat.
+            session.narration_pending = session.narration_pending[len(captured):]
+            session.turns += 1
+            session.history.append(
+                {"role": "user", "parts": [{"text": f"[Live narration] {narration}"}]}
+            )
+
+            scene_prompt = (payload.get("scene_prompt") or "").strip() or narration
+            caption = (payload.get("caption") or "").strip() or self._json_excerpt(narration, 120)
+
+            await emit({"type": "status", "content": "illustrating"})
+            image_event = await self.visuals.generate_scene(session, scene_prompt)
+            if image_event:
+                session.history.append({"role": "model", "parts": [{"text": "[illustration]"}]})
+                await emit({
+                    "type": "image",
+                    "content": image_event.content,
+                    "mime_type": image_event.mime_type,
+                })
+
+            memory_items = payload.get("memory") or []
+            if memory_items:
+                session.memory = [
+                    StoryMemory(
+                        label=(item.get("label") or "Story thread")[:40],
+                        detail=(item.get("detail") or "").strip()[:180],
+                    )
+                    for item in memory_items[:5]
+                    if item.get("detail")
+                ]
+
+            session.storyboard.append(
+                StoryboardBeat(
+                    turn=session.turns,
+                    caption=caption[:120],
+                    image=image_event.content if image_event else None,
+                    mime_type=image_event.mime_type if image_event else None,
+                )
+            )
+            session.storyboard = session.storyboard[-8:]
+
+            await emit({
+                "type": "memory",
+                "items": [{"label": item.label, "detail": item.detail} for item in session.memory],
+            })
+            await emit({
+                "type": "storyboard",
+                "items": [
+                    {
+                        "turn": beat.turn,
+                        "caption": beat.caption,
+                        "image": beat.image,
+                        "mime_type": beat.mime_type,
+                    }
+                    for beat in session.storyboard
+                ],
+            })
+            await emit({"type": "status", "content": "beat_complete"})
+            logger.info(
+                "Narration beat illustrated for session_id={} turn={} (forced={})",
+                session.session_id, session.turns, force,
+            )
+            return True
 
     async def create_story(self, genre: str, premise: str, director_mode: str = "cinematic") -> dict:
         title_resp = await self.client.aio.models.generate_content(
