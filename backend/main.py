@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -141,6 +142,27 @@ async def ws_story(websocket: WebSocket, sid: str):
         await websocket.close(); return
     logger.info("WebSocket connected for session_id={}", sid)
     await websocket.send_json({"type":"system","content":f"Connected: {session.title}"})
+
+    async def emit(payload: dict):
+        try:
+            await websocket.send_json(payload)
+        except Exception:
+            logger.debug("Dropped narration event for closed socket session_id={}", sid)
+
+    async def narration_beat(force: bool):
+        try:
+            await story_service.run_narration_beat(session, emit, force=force)
+        except Exception as exc:
+            logger.exception("Narration beat failed for session_id={}: {}", sid, exc)
+            await emit({"type": "error", "content": format_model_error(exc)})
+
+    narration_tasks: set[asyncio.Task] = set()
+
+    def spawn_narration_beat(force: bool):
+        task = asyncio.create_task(narration_beat(force))
+        narration_tasks.add(task)
+        task.add_done_callback(narration_tasks.discard)
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -160,6 +182,20 @@ async def ws_story(websocket: WebSocket, sid: str):
                     logger.error("Story turn failed for session_id={}: {}", sid, result["error"])
                     await websocket.send_json({"type":"error","content":result["error"]})
                 await websocket.send_json({"type":"status","content":"complete"})
+            elif data.get("type") == "narration":
+                chunk = (data.get("content") or "").strip()
+                if chunk:
+                    session.narration_pending = (
+                        f"{session.narration_pending} {chunk}".strip()
+                        if session.narration_pending else chunk
+                    )
+                    # Beat runs in the background so the receive loop keeps
+                    # accepting chunks; the per-session lock in the service
+                    # prevents overlapping generations.
+                    if not session.narration_lock.locked():
+                        spawn_narration_beat(False)
+            elif data.get("type") == "narration_flush":
+                spawn_narration_beat(True)
             elif data.get("type")=="ping":
                 await websocket.send_json({"type":"pong"})
     except WebSocketDisconnect:

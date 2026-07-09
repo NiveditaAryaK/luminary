@@ -1,5 +1,6 @@
-from dataclasses import dataclass, field
+import asyncio
 import uuid
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -40,6 +41,7 @@ class StorySession:
     last_image: str | None = None
     last_image_mime: str | None = None
     narration_pending: str = ""
+    narration_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
 
     def snapshot(self) -> dict:
         return {

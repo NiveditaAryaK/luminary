@@ -1,3 +1,7 @@
+
+
+
+
 """Visual continuity engine.
 
 Keeps every generated illustration in one session visually connected:
