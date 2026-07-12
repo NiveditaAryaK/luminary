@@ -27,3 +27,6 @@ steps:
 
 images:
   - "us-central1-docker.pkg.dev/$PROJECT_ID/luminary-repo/luminary:$COMMIT_SHA"
+  
+options:
+  logging: CLOUD_LOGGING_ONLY
