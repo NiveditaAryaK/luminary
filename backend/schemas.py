@@ -24,3 +24,8 @@ class NarrationReq(BaseModel):
     genre: str = "fantasy"
     voice_name: str | None = None
     language_code: str | None = None
+
+
+class FilmReq(BaseModel):
+    voice_name: str | None = None
+    language_code: str | None = None

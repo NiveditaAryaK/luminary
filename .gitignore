@@ -11,3 +11,4 @@ frontend/.env.local
 backend/*.json
 *.log
 backend/server.log
+backend/renders/

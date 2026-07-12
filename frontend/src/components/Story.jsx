@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { useStorySession } from '../hooks/useStorySession'
+import { useFilmRender } from '../hooks/useFilmRender'
 import { useLiveNarration } from '../hooks/useLiveNarration'
 import { useNarration } from '../hooks/useNarration'
 import { useSpeechInput } from '../hooks/useSpeechInput'
@@ -36,6 +37,8 @@ export default function Story({ session, onExit, onSnapshot }) {
   } = useStorySession(session)
   const bottomRef = useRef(null)
   const [direction, setDirection] = useState('')
+  const { film, createFilm } = useFilmRender(session.sessionId)
+  const hasIllustratedBeats = storyboard.some((beat) => beat.image)
   const {
     interimTranscript,
     isNarrating,
@@ -341,6 +344,51 @@ export default function Story({ session, onExit, onSnapshot }) {
               </div>
             </div>
           )}
+
+          <div className="film-panel">
+            <div className="choices-header">
+              <span>Finish story</span>
+              <p>Cut the illustrated beats into a narrated short film with title cards and crossfades.</p>
+            </div>
+
+            {film.status === 'rendering' && (
+              <div className="film-progress">
+                <div className="film-progress-track">
+                  <div className="film-progress-fill" style={{ width: `${Math.round(film.progress * 100)}%` }} />
+                </div>
+                <span>{film.message || 'Rendering…'}</span>
+              </div>
+            )}
+
+            {film.status === 'error' && (
+              <div className="story-alert">{film.error}</div>
+            )}
+
+            {film.status === 'done' && (
+              <div className="film-result">
+                <video className="film-player" controls src={film.videoUrl} />
+                <a className="film-download" href={film.videoUrl} download>
+                  Download MP4
+                </a>
+              </div>
+            )}
+
+            <button
+              className="film-btn"
+              type="button"
+              onClick={createFilm}
+              disabled={streaming || isNarrating || film.status === 'rendering' || !hasIllustratedBeats}
+            >
+              {film.status === 'rendering'
+                ? 'Rendering film…'
+                : film.status === 'done'
+                  ? 'Re-render film'
+                  : 'Create Film'}
+            </button>
+            {!hasIllustratedBeats && (
+              <p className="film-hint">Play a few scenes first — the film is cut from your storyboard beats.</p>
+            )}
+          </div>
 
           <form className="director-box" onSubmit={submitDirection}>
             <div className="choices-header">

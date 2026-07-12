@@ -3,25 +3,27 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from google import genai
 from loguru import logger
 
 from config import PORT
+from film_service import FilmBusyError, FilmInputError, FilmService, FilmUnavailableError
 from gemini_utils import format_model_error
 from narration_service import NarrationService
-from schemas import CreateReq, NarrationReq, RestoreReq
+from schemas import CreateReq, FilmReq, NarrationReq, RestoreReq
 from story_service import StoryService
 
 client = None
 story_service = None
 narration_service = None
+film_service = None
 
 @asynccontextmanager
 async def lifespan(app):
-    global client, narration_service, story_service
+    global client, narration_service, story_service, film_service
     logger.remove()
     logger.add(
         os.path.join(os.path.dirname(__file__), "server.log"),
@@ -44,6 +46,9 @@ async def lifespan(app):
     except Exception as exc:
         narration_service = None
         logger.warning("Cloud TTS unavailable: {}", exc)
+    film_service = FilmService(narration_service)
+    if not film_service.ffmpeg_available():
+        logger.warning("ffmpeg not found — film rendering disabled until it is installed")
     logger.info("Luminary ready")
     yield
 
@@ -131,6 +136,57 @@ def synthesize_narration(req: NarrationReq):
 @app.post("/api/narration/speak")
 def api_synthesize_narration(req: NarrationReq):
     return synthesize_narration(req)
+
+@app.post("/story/{sid}/film")
+async def start_film_render(sid: str, req: FilmReq | None = None):
+    session = story_service.get_session(sid)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        return film_service.start_render(
+            session,
+            voice_name=req.voice_name if req else None,
+            language_code=req.language_code if req else None,
+        )
+    except FilmUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except FilmBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FilmInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.post("/api/story/{sid}/film")
+async def api_start_film_render(sid: str, req: FilmReq | None = None):
+    return await start_film_render(sid, req)
+
+@app.get("/story/{sid}/film/status")
+def film_status(sid: str):
+    job = film_service.get_job(sid)
+    if not job:
+        raise HTTPException(status_code=404, detail="No film render for this story yet.")
+    return film_service.job_public(job)
+
+@app.get("/api/story/{sid}/film/status")
+def api_film_status(sid: str):
+    return film_status(sid)
+
+@app.get("/story/{sid}/film/download")
+def film_download(sid: str):
+    job = film_service.get_job(sid)
+    if not job or job["status"] != "done" or not job.get("output_path"):
+        raise HTTPException(status_code=404, detail="Film is not ready yet.")
+    if not os.path.isfile(job["output_path"]):
+        raise HTTPException(status_code=404, detail="Rendered film file is missing.")
+    session = story_service.get_session(sid)
+    slug = "".join(
+        ch if ch.isalnum() or ch in " -_" else ""
+        for ch in (session.title if session else "luminary-film")
+    ).strip().replace(" ", "-") or "luminary-film"
+    return FileResponse(job["output_path"], media_type="video/mp4", filename=f"{slug}.mp4")
+
+@app.get("/api/story/{sid}/film/download")
+def api_film_download(sid: str):
+    return film_download(sid)
 
 @app.websocket("/ws/{sid}")
 async def ws_story(websocket: WebSocket, sid: str):
