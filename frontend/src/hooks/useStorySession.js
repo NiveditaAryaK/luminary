@@ -23,7 +23,9 @@ export function useStorySession(session) {
   const [memory, setMemory] = useState(session.savedMemory || [])
   const [storyboard, setStoryboard] = useState(session.savedStoryboard || [])
   const [saveVersion, setSaveVersion] = useState(0)
+  const [narrationStatus, setNarrationStatus] = useState('idle')
   const wsRef = useRef(null)
+  const pendingNarrationRef = useRef([])
   const activeSessionRef = useRef(session.sessionId)
   const closedByAppRef = useRef(false)
   const pendingInputsRef = useRef([])
@@ -56,6 +58,8 @@ export function useStorySession(session) {
     hasUsableContentRef.current = Boolean((session.savedSegments || []).length || (session.savedChoices || []).length)
     hasOpenedRef.current = false
     pendingInputsRef.current = []
+    pendingNarrationRef.current = []
+    setNarrationStatus('idle')
     closeSocket()
     if (session.autoStart !== false) {
       startStory()
@@ -87,6 +91,9 @@ export function useStorySession(session) {
         content: nextInput.content,
         director_mode: nextInput.directorMode,
       }))
+    }
+    while (pendingNarrationRef.current.length > 0 && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(pendingNarrationRef.current.shift()))
     }
   }
 
@@ -126,6 +133,13 @@ export function useStorySession(session) {
         setSaveVersion((version) => version + 1)
         streamBufferRef.current = ''
         fullTextRef.current = ''
+      }
+      if (msg.content === 'illustrating') {
+        setNarrationStatus('illustrating')
+      }
+      if (msg.content === 'beat_complete') {
+        setNarrationStatus('idle')
+        setSaveVersion((version) => version + 1)
       }
       return
     }
@@ -261,14 +275,47 @@ export function useStorySession(session) {
     sendChoice(nextChoice)
   }
 
+  function sendNarrationPayload(payload) {
+    const ws = ensureWS()
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(payload))
+    } else {
+      pendingNarrationRef.current.push(payload)
+    }
+  }
+
+  function sendNarration(text) {
+    const chunk = text?.trim()
+    if (!chunk) return
+    setError('')
+    hasUsableContentRef.current = true
+    // Spoken words appear as prose in the feed immediately; contiguous
+    // chunks merge into one narration paragraph until an image lands.
+    setSegments((current) => {
+      const last = current[current.length - 1]
+      if (last?.type === 'narration') {
+        return [...current.slice(0, -1), { type: 'narration', content: `${last.content} ${chunk}` }]
+      }
+      return [...current, { type: 'narration', content: chunk }]
+    })
+    sendNarrationPayload({ type: 'narration', content: chunk })
+  }
+
+  function flushNarration() {
+    sendNarrationPayload({ type: 'narration_flush' })
+  }
+
   return {
     choices,
     directorMode,
     error,
+    flushNarration,
     makeChoice,
     memory,
+    narrationStatus,
     saveVersion,
     segments,
+    sendNarration,
     setDirectorMode,
     storyboard,
     streaming,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { useStorySession } from '../hooks/useStorySession'
+import { useLiveNarration } from '../hooks/useLiveNarration'
 import { useNarration } from '../hooks/useNarration'
 import { useSpeechInput } from '../hooks/useSpeechInput'
 import { stripChoiceMarkup } from '../utils/storyText'
@@ -21,10 +22,13 @@ export default function Story({ session, onExit, onSnapshot }) {
     choices,
     directorMode,
     error,
+    flushNarration,
     makeChoice,
     memory,
+    narrationStatus,
     saveVersion,
     segments,
+    sendNarration,
     setDirectorMode,
     storyboard,
     streaming,
@@ -32,6 +36,15 @@ export default function Story({ session, onExit, onSnapshot }) {
   } = useStorySession(session)
   const bottomRef = useRef(null)
   const [direction, setDirection] = useState('')
+  const {
+    interimTranscript,
+    isNarrating,
+    startNarrating,
+    stopNarrating,
+    supported: liveNarrationSupported,
+  } = useLiveNarration({
+    onChunk: (chunk) => sendNarration(chunk),
+  })
   const visibleSegments = segments
     .map((seg) => (
       seg.type === 'text' || seg.type === 'text_stream'
@@ -73,7 +86,16 @@ export default function Story({ session, onExit, onSnapshot }) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [segments, streaming])
+  }, [segments, streaming, interimTranscript, narrationStatus])
+
+  function toggleLiveNarration() {
+    if (isNarrating) {
+      stopNarrating()
+      flushNarration()
+    } else {
+      startNarrating()
+    }
+  }
 
   useEffect(() => {
     if (!onSnapshot || saveVersion === 0) return
@@ -110,7 +132,7 @@ export default function Story({ session, onExit, onSnapshot }) {
   function submitDirection(event) {
     event.preventDefault()
     const nextDirection = direction.trim()
-    if (!nextDirection || streaming) return
+    if (!nextDirection || streaming || isNarrating) return
     makeChoice(nextDirection)
     setDirection('')
   }
@@ -210,6 +232,27 @@ export default function Story({ session, onExit, onSnapshot }) {
         </aside>
 
         <section className="story-main">
+          {liveNarrationSupported && (
+            <div className={`narrate-bar ${isNarrating ? 'live' : ''}`}>
+              <button
+                className={`narrate-toggle ${isNarrating ? 'live' : ''}`}
+                type="button"
+                onClick={toggleLiveNarration}
+                disabled={streaming || isListening}
+              >
+                <span className="narrate-mic" aria-hidden="true" />
+                {isNarrating ? 'Stop narrating' : 'Narrate live'}
+              </button>
+              <span className="narrate-hint">
+                {isNarrating
+                  ? narrationStatus === 'illustrating'
+                    ? 'Painting the scene…'
+                    : 'Listening — tell the story out loud, it appears below as you speak.'
+                  : 'Speak the story yourself and Luminary illustrates each scene as you describe it.'}
+              </span>
+            </div>
+          )}
+
           <div className="segments">
             {error && <div className="story-alert">{error}</div>}
 
@@ -226,8 +269,29 @@ export default function Story({ session, onExit, onSnapshot }) {
                 {seg.type === 'choice' && (
                   <p className="choice-echo">Last direction: {seg.content}</p>
                 )}
+                {seg.type === 'narration' && (
+                  <>
+                    <span className="narration-label">You narrate</span>
+                    <p className="seg-text narration-text">{seg.content}</p>
+                  </>
+                )}
               </div>
             ))}
+
+            {isNarrating && (
+              <div className="segment-card narration-live-card">
+                <span className="narration-label live">Narrating live</span>
+                <p className="seg-text narration-text interim">
+                  {interimTranscript || 'Listening…'}
+                </p>
+              </div>
+            )}
+
+            {narrationStatus === 'illustrating' && (
+              <div className="streaming narration-illustrating">
+                <span className="dot">◆</span> Painting the scene…
+              </div>
+            )}
 
             {streaming && (
               <div className="streaming">
@@ -269,7 +333,7 @@ export default function Story({ session, onExit, onSnapshot }) {
               </div>
               <div className="choices">
                 {choices.map((c, i) => (
-                  <button key={i} className="choice-btn" onClick={() => makeChoice(c)} disabled={streaming}>
+                  <button key={i} className="choice-btn" onClick={() => makeChoice(c)} disabled={streaming || isNarrating}>
                     <span className="choice-index">0{i + 1}</span>
                     <span>{c}</span>
                   </button>
@@ -289,17 +353,17 @@ export default function Story({ session, onExit, onSnapshot }) {
                 placeholder="Example: Follow the staircase into the moonlight, but keep the telescope recording everything."
                 value={direction}
                 onChange={(e) => setDirection(e.target.value)}
-                disabled={streaming}
+                disabled={streaming || isNarrating}
               />
               {speechInputSupported && (
                 <div className="voice-tools inline">
-                  <button className={`voice-btn ${isListening ? 'live' : ''}`} onClick={isListening ? stopListening : startListening} type="button">
+                  <button className={`voice-btn ${isListening ? 'live' : ''}`} onClick={isListening ? stopListening : startListening} type="button" disabled={isNarrating}>
                     {isListening ? 'Stop dictation' : 'Dictate direction'}
                   </button>
-                  <span>{isListening ? 'Listening...' : 'Speak the next direction out loud.'}</span>
+                  <span>{isNarrating ? 'Live narration is using the microphone.' : isListening ? 'Listening...' : 'Speak the next direction out loud.'}</span>
                 </div>
               )}
-              <button className="director-submit" type="submit" disabled={streaming || !direction.trim()}>
+              <button className="director-submit" type="submit" disabled={streaming || isNarrating || !direction.trim()}>
                 Send Direction
               </button>
             </div>
