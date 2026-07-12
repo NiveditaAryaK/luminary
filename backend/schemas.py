@@ -16,6 +16,7 @@ class RestoreReq(BaseModel):
     director_mode: str = "cinematic"
     memory: list[dict] = Field(default_factory=list)
     storyboard: list[dict] = Field(default_factory=list)
+    style_bible: str = ""
 
 
 class NarrationReq(BaseModel):

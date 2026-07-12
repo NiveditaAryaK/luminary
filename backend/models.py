@@ -1,5 +1,6 @@
-from dataclasses import dataclass, field
+import asyncio
 import uuid
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -34,6 +35,13 @@ class StorySession:
     memory: list[StoryMemory] = field(default_factory=list)
     storyboard: list[StoryboardBeat] = field(default_factory=list)
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    style_bible: str = ""
+    anchor_image: str | None = None
+    anchor_mime: str | None = None
+    last_image: str | None = None
+    last_image_mime: str | None = None
+    narration_pending: str = ""
+    narration_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
 
     def snapshot(self) -> dict:
         return {
@@ -44,6 +52,7 @@ class StorySession:
             "history": self.history,
             "turns": self.turns,
             "director_mode": self.director_mode,
+            "style_bible": self.style_bible,
             "memory": [{"label": item.label, "detail": item.detail} for item in self.memory],
             "storyboard": [
                 {

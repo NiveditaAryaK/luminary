@@ -1,17 +1,40 @@
+import asyncio
 import base64
 import json
 
 from google.genai import types
 from loguru import logger
 
-from config import FALLBACK_MODEL, IMAGE_MODEL, STORY_MODEL, SYSTEM_INSTRUCTION, TITLE_MODEL
+from config import (
+    FALLBACK_MODEL,
+    NARRATION_BEAT_THRESHOLD,
+    STORY_MODEL,
+    SYSTEM_INSTRUCTION,
+    TITLE_MODEL,
+)
 from gemini_utils import format_model_error
 from models import StoryEvent, StoryMemory, StorySession, StoryboardBeat
+from visual_engine import VisualEngine
+
+
+NARRATION_BEAT_PROMPT = (
+    "You listen to a live storyteller and decide when enough of a scene has been described to illustrate it. "
+    "Return strict JSON with keys: beat_complete, scene_prompt, caption, memory. "
+    "beat_complete: true only when the narration so far paints one coherent, visualizable scene "
+    "(a place, characters or subjects, and an action or mood). "
+    "scene_prompt: one vivid paragraph an illustrator can paint, grounded ONLY in what was narrated. "
+    "caption: a short storyboard caption (max 12 words). "
+    "memory: up to 5 objects with label and detail — durable story facts only "
+    "(characters, promises, secrets, objects, relationships, wounds, goals), merging the existing memory "
+    "with anything new from the narration.\n"
+    "Title: {title}\nGenre: {genre}\nExisting memory:\n{memory}\nNarration so far:\n{narration}"
+)
 
 
 class StoryService:
     def __init__(self, client):
         self.client = client
+        self.visuals = VisualEngine(client)
         self.sessions: dict[str, StorySession] = {}
 
     def _extract_text(self, response) -> str:
@@ -41,20 +64,25 @@ class StoryService:
     def _build_director_prompt(self, session: StorySession, choice: str) -> str:
         memory_context = self._build_memory_context(session)
         if session.turns == 1:
-            return (
+            prompt = (
                 f"Begin a {session.genre} story under a {session.director_mode} director mode. "
                 f"Premise: {session.premise}. "
                 "Write a vivid opening scene with clear emotional momentum, generate a cinematic illustration, "
                 "and end with exactly 3 distinct choices."
                 f"\nLocked memory:\n{memory_context}"
             )
-
-        return (
-            f"The reader chose: {choice}. Continue the {session.genre} story in a {session.director_mode} mode. "
-            "Show immediate consequences, reveal something that deepens the emotional stakes or world, "
-            "generate a scene illustration, and end with exactly 3 distinct choices."
-            f"\nLocked memory:\n{memory_context}"
-        )
+        else:
+            prompt = (
+                f"The reader chose: {choice}. Continue the {session.genre} story in a {session.director_mode} mode. "
+                "Show immediate consequences, reveal something that deepens the emotional stakes or world, "
+                "generate a scene illustration, and end with exactly 3 distinct choices."
+                f"\nLocked memory:\n{memory_context}"
+            )
+        if session.style_bible:
+            prompt += (
+                f"\nVisual style bible — every illustration must follow it exactly:\n{session.style_bible}"
+            )
+        return prompt
 
     def _parse_json_block(self, text: str) -> dict | None:
         if not text:
@@ -191,37 +219,116 @@ class StoryService:
             session.storyboard = session.storyboard[-8:]
 
     async def _generate_scene_image(self, session: StorySession, text_context: str) -> StoryEvent | None:
-        prompt = (
-            f"Create a cinematic illustration for this {session.genre} story beat.\n"
-            f"Story title: {session.title}\n"
-            f"Scene context: {text_context[:1200]}\n"
-            "Match the emotional tone and keep character appearance consistent."
-        )
+        return await self.visuals.generate_scene(session, text_context)
 
+    async def _detect_narration_beat(self, session: StorySession, narration: str) -> dict:
+        prompt = NARRATION_BEAT_PROMPT.format(
+            title=session.title,
+            genre=session.genre,
+            memory=self._build_memory_context(session),
+            narration=self._json_excerpt(narration, 2000),
+        )
         try:
             response = await self.client.aio.models.generate_content(
-                model=IMAGE_MODEL,
+                model=FALLBACK_MODEL,
                 contents=[{"role": "user", "parts": [{"text": prompt}]}],
-                config=types.GenerateContentConfig(response_modalities=["IMAGE"]),
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=600,
+                    response_mime_type="application/json",
+                ),
+            )
+            return self._parse_json_block(self._extract_text(response)) or {}
+        except Exception as exc:
+            logger.warning("Narration beat detection failed: {}", exc)
+            return {}
+
+    async def run_narration_beat(self, session: StorySession, emit, force: bool = False) -> bool:
+        """Illustrate the pending narration buffer once it forms a complete beat.
+
+        `emit` is an async callback receiving websocket-ready event dicts.
+        Returns True when a beat was illustrated. The per-session lock keeps
+        overlapping narration chunks from triggering concurrent generations;
+        chunks arriving mid-generation stay in the buffer for the next check.
+        """
+        if session.narration_lock.locked() and not force:
+            return False
+        async with session.narration_lock:
+            captured = session.narration_pending
+            narration = captured.strip()
+            if not narration:
+                return False
+            if not force and len(narration) < NARRATION_BEAT_THRESHOLD:
+                return False
+
+            payload = await self._detect_narration_beat(session, narration)
+            if not force and not payload.get("beat_complete"):
+                return False
+
+            # Consume only what we captured — chunks appended while the model
+            # calls below run remain buffered for the next beat.
+            session.narration_pending = session.narration_pending[len(captured):]
+            session.turns += 1
+            session.history.append(
+                {"role": "user", "parts": [{"text": f"[Live narration] {narration}"}]}
             )
 
-            candidates = getattr(response, "candidates", None) or []
-            for candidate in candidates:
-                content = getattr(candidate, "content", None)
-                parts = getattr(content, "parts", None) or []
-                for part in parts:
-                    inline_data = getattr(part, "inline_data", None)
-                    if inline_data:
-                        image = base64.b64encode(inline_data.data).decode()
-                        return StoryEvent(
-                            type="image",
-                            content=image,
-                            mime_type=inline_data.mime_type,
-                        )
-        except Exception as exc:
-            logger.warning("Scene image generation failed: {}", exc)
+            scene_prompt = (payload.get("scene_prompt") or "").strip() or narration
+            caption = (payload.get("caption") or "").strip() or self._json_excerpt(narration, 120)
 
-        return None
+            await emit({"type": "status", "content": "illustrating"})
+            image_event = await self.visuals.generate_scene(session, scene_prompt)
+            if image_event:
+                session.history.append({"role": "model", "parts": [{"text": "[illustration]"}]})
+                await emit({
+                    "type": "image",
+                    "content": image_event.content,
+                    "mime_type": image_event.mime_type,
+                })
+
+            memory_items = payload.get("memory") or []
+            if memory_items:
+                session.memory = [
+                    StoryMemory(
+                        label=(item.get("label") or "Story thread")[:40],
+                        detail=(item.get("detail") or "").strip()[:180],
+                    )
+                    for item in memory_items[:5]
+                    if item.get("detail")
+                ]
+
+            session.storyboard.append(
+                StoryboardBeat(
+                    turn=session.turns,
+                    caption=caption[:120],
+                    image=image_event.content if image_event else None,
+                    mime_type=image_event.mime_type if image_event else None,
+                )
+            )
+            session.storyboard = session.storyboard[-8:]
+
+            await emit({
+                "type": "memory",
+                "items": [{"label": item.label, "detail": item.detail} for item in session.memory],
+            })
+            await emit({
+                "type": "storyboard",
+                "items": [
+                    {
+                        "turn": beat.turn,
+                        "caption": beat.caption,
+                        "image": beat.image,
+                        "mime_type": beat.mime_type,
+                    }
+                    for beat in session.storyboard
+                ],
+            })
+            await emit({"type": "status", "content": "beat_complete"})
+            logger.info(
+                "Narration beat illustrated for session_id={} turn={} (forced={})",
+                session.session_id, session.turns, force,
+            )
+            return True
 
     async def create_story(self, genre: str, premise: str, director_mode: str = "cinematic") -> dict:
         title_resp = await self.client.aio.models.generate_content(
@@ -269,6 +376,7 @@ class StoryService:
         director_mode: str = "cinematic",
         memory: list[dict] | None = None,
         storyboard: list[dict] | None = None,
+        style_bible: str = "",
     ):
         session = StorySession(
             genre=genre,
@@ -292,7 +400,9 @@ class StoryService:
                 for index, item in enumerate(storyboard or [])
                 if item.get("caption") or item.get("image")
             ],
+            style_bible=style_bible or "",
         )
+        self.visuals.adopt_restored_images(session)
         self.sessions[session.session_id] = session
         logger.info("Restored story session_id={} title='{}' turns={}", session.session_id, title, turns)
         return {
@@ -322,10 +432,20 @@ class StoryService:
 
         session.history.append({"role": "user", "parts": [{"text": prompt}]})
 
+        # Send previous illustrations as transient reference parts so the
+        # interleaved model keeps characters and style visually connected.
+        # They are not stored in history to keep the context small.
+        reference_parts = self.visuals.reference_parts(session)
+        contents = session.history
+        if reference_parts:
+            contents = session.history[:-1] + [
+                {"role": "user", "parts": reference_parts + [{"text": prompt}]}
+            ]
+
         try:
             response = await self.client.aio.models.generate_content(
                 model=STORY_MODEL,
-                contents=session.history,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
                     temperature=0.9,
@@ -344,20 +464,24 @@ class StoryService:
                     img = base64.b64encode(part.inline_data.data).decode()
                     events.append(StoryEvent(type="image", content=img, mime_type=part.inline_data.mime_type))
                     parts.append({"text": "[illustration]"})
+                    self.visuals.register_image(session, img, part.inline_data.mime_type)
                     image_added = True
 
+            text_context = "\n\n".join(event.content for event in events if event.type == "text")
+            await self.visuals.ensure_style_bible(session, text_context)
+
             if not any(event.type == "image" for event in events):
-                text_context = "\n\n".join(event.content for event in events if event.type == "text")
                 generated_image = await self._generate_scene_image(session, text_context)
                 if generated_image:
                     events.append(generated_image)
                     parts.append({"text": "[illustration]"})
 
             session.history.append({"role": "model", "parts": parts})
-            text_context = "\n\n".join(event.content for event in events if event.type == "text")
             image_event = next((event for event in events if event.type == "image"), None)
-            choices = await self._ensure_choices(session, text_context)
-            await self._refresh_story_state(session, text_context, image_event, choice)
+            choices, _ = await asyncio.gather(
+                self._ensure_choices(session, text_context),
+                self._refresh_story_state(session, text_context, image_event, choice),
+            )
             return {
                 "events": [
                     {"type": event.type, "content": event.content, **({"mime_type": event.mime_type} if event.mime_type else {})}
@@ -397,8 +521,10 @@ class StoryService:
                     parts.append({"text": "[illustration]"})
                 session.history.append({"role": "model", "parts": parts})
                 image_event = next((event for event in events if event.type == "image"), None)
-                choices = await self._ensure_choices(session, fallback.text)
-                await self._refresh_story_state(session, fallback.text, image_event, choice)
+                choices, _ = await asyncio.gather(
+                    self._ensure_choices(session, fallback.text),
+                    self._refresh_story_state(session, fallback.text, image_event, choice),
+                )
                 return {
                     "events": [
                         {"type": event.type, "content": event.content, **({"mime_type": event.mime_type} if event.mime_type else {})}
