@@ -17,6 +17,7 @@ from loguru import logger
 
 from config import FALLBACK_MODEL, IMAGE_MODEL
 from models import StoryEvent, StorySession
+from text_utils import strip_choice_markup
 
 
 STYLE_BIBLE_PROMPT = (
@@ -34,6 +35,7 @@ class VisualEngine:
         self.client = client
 
     async def ensure_style_bible(self, session: StorySession, context: str):
+        context = strip_choice_markup(context)
         if session.style_bible or not context.strip():
             return
         try:
@@ -91,6 +93,9 @@ class VisualEngine:
         session.last_image_mime = last.mime_type
 
     async def generate_scene(self, session: StorySession, scene_text: str) -> StoryEvent | None:
+        # Reader choices are UI, not scene content — if they reach the image
+        # prompt the model paints them into the illustration.
+        scene_text = strip_choice_markup(scene_text)
         if not scene_text.strip():
             return None
 
@@ -109,7 +114,11 @@ class VisualEngine:
                 "Keep the same characters, faces, wardrobe, art style, palette, and lighting language — "
                 "this must look like the next frame of the same film.\n"
             )
-        prompt += f"Scene to illustrate:\n{scene_text[:1200]}"
+        prompt += (
+            f"Scene to illustrate:\n{scene_text[:1200]}\n"
+            "The image must be purely visual: no words, letters, numbers, captions, "
+            "subtitles, watermarks, menus, or interface elements of any kind."
+        )
 
         try:
             response = await self.client.aio.models.generate_content(

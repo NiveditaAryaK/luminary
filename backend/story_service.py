@@ -14,6 +14,7 @@ from config import (
 )
 from gemini_utils import format_model_error
 from models import StoryEvent, StoryMemory, StorySession, StoryboardBeat
+from text_utils import strip_choice_markup
 from visual_engine import VisualEngine
 
 
@@ -176,6 +177,8 @@ class StoryService:
         return self._default_choices(session)
 
     async def _refresh_story_state(self, session: StorySession, text_context: str, image_event: StoryEvent | None, choice: str):
+        # Choice markup is reader UI — keep it out of captions and memory.
+        text_context = strip_choice_markup(text_context)
         if not text_context.strip():
             return
 

@@ -9,6 +9,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from text_utils import strip_choice_markup
+
 RENDERS_DIR = Path(__file__).parent / "renders"
 FILM_WIDTH = 1280
 FILM_HEIGHT = 720
@@ -34,8 +36,6 @@ FONT_CANDIDATES = [
     "/System/Library/Fonts/Supplemental/Georgia.ttf",
 ]
 
-CHOICE_MARKUP = re.compile(r"CHOICE_[A-C]\s*:\s*[\s\S]*?(?=CHOICE_[A-C]\s*:|$)", re.IGNORECASE)
-
 IMAGE_EXTENSIONS = {
     "image/png": "png",
     "image/jpeg": "jpg",
@@ -57,12 +57,6 @@ class FilmBusyError(FilmError):
 
 class FilmInputError(FilmError):
     """The session has nothing renderable yet."""
-
-
-def _strip_choice_markup(text: str) -> str:
-    cleaned = CHOICE_MARKUP.sub("", text or "")
-    cleaned = re.sub(r"\[illustration\]", "", cleaned, flags=re.IGNORECASE)
-    return cleaned.strip()
 
 
 def _chunk_prose(text: str, max_chars: int = SUBTITLE_MAX_CHARS) -> list[str]:
@@ -107,7 +101,7 @@ def _collect_turn_prose(history: list[dict]) -> dict[int, str]:
             if joined.startswith("[Live narration]"):
                 prose[turn] = joined.replace("[Live narration]", "", 1).strip()
         elif turn:
-            cleaned = _strip_choice_markup(joined)
+            cleaned = strip_choice_markup(joined)
             if cleaned:
                 prose[turn] = cleaned
     return prose
