@@ -29,3 +29,7 @@ class NarrationReq(BaseModel):
 class FilmReq(BaseModel):
     voice_name: str | None = None
     language_code: str | None = None
+
+
+class PublishReq(BaseModel):
+    uid: str

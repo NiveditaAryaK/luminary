@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { useAuth } from '../hooks/useAuth'
 import { useStorySession } from '../hooks/useStorySession'
 import { useFilmRender } from '../hooks/useFilmRender'
 import { useLiveNarration } from '../hooks/useLiveNarration'
+import { useYouTubePublish } from '../hooks/useYouTubePublish'
 import { useNarration } from '../hooks/useNarration'
 import { useSpeechInput } from '../hooks/useSpeechInput'
 import { stripChoiceMarkup } from '../utils/storyText'
@@ -38,6 +40,14 @@ export default function Story({ session, onExit, onSnapshot }) {
   const bottomRef = useRef(null)
   const [direction, setDirection] = useState('')
   const { film, createFilm } = useFilmRender(session.sessionId)
+  const { user } = useAuth()
+  const {
+    configured: youtubeConfigured,
+    connected: youtubeConnected,
+    connect: connectYouTube,
+    publish,
+    publishFilm,
+  } = useYouTubePublish(session.sessionId, user?.uid)
   const hasIllustratedBeats = storyboard.some((beat) => beat.image)
   const {
     interimTranscript,
@@ -367,9 +377,34 @@ export default function Story({ session, onExit, onSnapshot }) {
             {film.status === 'done' && (
               <div className="film-result">
                 <video className="film-player" controls src={film.videoUrl} />
-                <a className="film-download" href={film.videoUrl} download>
-                  Download MP4
-                </a>
+                <div className="film-actions">
+                  <a className="film-download" href={film.videoUrl} download>
+                    Download MP4
+                  </a>
+                  {youtubeConfigured && publish.status !== 'done' && (
+                    <button
+                      className="film-download yt-btn"
+                      type="button"
+                      onClick={youtubeConnected ? publishFilm : connectYouTube}
+                      disabled={publish.status === 'uploading'}
+                    >
+                      {publish.status === 'uploading'
+                        ? `Publishing… ${Math.round(publish.progress * 100)}%`
+                        : youtubeConnected
+                          ? 'Publish to YouTube'
+                          : 'Connect YouTube'}
+                    </button>
+                  )}
+                </div>
+                {publish.status === 'done' && (
+                  <p className="yt-result">
+                    Published to your channel (private) —{' '}
+                    <a href={publish.url} target="_blank" rel="noreferrer">{publish.title || 'Watch on YouTube'}</a>
+                  </p>
+                )}
+                {publish.status === 'error' && (
+                  <div className="story-alert">{publish.error}</div>
+                )}
               </div>
             )}
 

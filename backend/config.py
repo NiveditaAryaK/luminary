@@ -15,6 +15,10 @@ NARRATION_BEAT_THRESHOLD = int(os.getenv("NARRATION_BEAT_THRESHOLD", "150"))
 FIRESTORE_PROJECT = os.getenv("FIRESTORE_PROJECT", "")
 SESSION_COLLECTION = os.getenv("SESSION_COLLECTION", "story_sessions")
 SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
+YT_CLIENT_ID = os.getenv("YT_CLIENT_ID", "")
+YT_CLIENT_SECRET = os.getenv("YT_CLIENT_SECRET", "")
+YT_REDIRECT_URI = os.getenv("YT_REDIRECT_URI", "")
+YT_TOKEN_COLLECTION = os.getenv("YT_TOKEN_COLLECTION", "yt_tokens")
 PORT = int(os.getenv("PORT", 8080))
 
 SYSTEM_INSTRUCTION = """You are Luminary, a master cinematic storyteller.

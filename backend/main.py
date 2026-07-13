@@ -3,7 +3,7 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from google import genai
@@ -13,19 +13,27 @@ from config import PORT
 from film_service import FilmBusyError, FilmInputError, FilmService, FilmUnavailableError
 from gemini_utils import format_model_error
 from narration_service import NarrationService
-from schemas import CreateReq, FilmReq, NarrationReq, RestoreReq
+from schemas import CreateReq, FilmReq, NarrationReq, PublishReq, RestoreReq
 from session_store import SessionStore
 from story_service import StoryService
+from youtube_service import (
+    YouTubeBusyError,
+    YouTubeError,
+    YouTubeNotConfiguredError,
+    YouTubeNotConnectedError,
+    YouTubeService,
+)
 
 client = None
 story_service = None
 narration_service = None
 film_service = None
 session_store = None
+youtube_service = None
 
 @asynccontextmanager
 async def lifespan(app):
-    global client, narration_service, story_service, film_service, session_store
+    global client, narration_service, story_service, film_service, session_store, youtube_service
     logger.remove()
     logger.add(
         os.path.join(os.path.dirname(__file__), "server.log"),
@@ -47,6 +55,9 @@ async def lifespan(app):
     # credential hiccup no longer disables narration for good.
     narration_service = NarrationService()
     film_service = FilmService(narration_service)
+    youtube_service = YouTubeService(client, session_store)
+    if not youtube_service.configured():
+        logger.info("YouTube publishing disabled (YT_CLIENT_ID/YT_CLIENT_SECRET/YT_REDIRECT_URI not set)")
     if not film_service.ffmpeg_available():
         logger.warning("ffmpeg not found — film rendering disabled until it is installed")
     logger.info("Luminary ready")
@@ -197,6 +208,87 @@ def film_download(sid: str):
 @app.get("/api/story/{sid}/film/download")
 def api_film_download(sid: str):
     return film_download(sid)
+
+@app.get("/youtube/status")
+def youtube_status(uid: str):
+    return {
+        "configured": youtube_service.configured(),
+        "connected": youtube_service.configured() and youtube_service.connected(uid),
+    }
+
+@app.get("/api/youtube/status")
+def api_youtube_status(uid: str):
+    return youtube_status(uid)
+
+@app.get("/youtube/auth/start")
+def youtube_auth_start(uid: str):
+    try:
+        return RedirectResponse(youtube_service.auth_url(uid))
+    except YouTubeNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+@app.get("/api/youtube/auth/start")
+def api_youtube_auth_start(uid: str):
+    return youtube_auth_start(uid)
+
+@app.get("/youtube/oauth/callback")
+async def youtube_oauth_callback(state: str = "", code: str = "", error: str = ""):
+    if error or not code:
+        message = "YouTube connection was cancelled."
+    else:
+        try:
+            await asyncio.to_thread(youtube_service.handle_callback, state, code)
+            message = "YouTube connected. You can close this window."
+        except Exception as exc:
+            logger.exception("YouTube OAuth callback failed: {}", exc)
+            message = "YouTube connection failed. Close this window and try again."
+    return HTMLResponse(
+        "<html><body style=\"background:#0d0f18;color:#f7e9bf;"
+        "font-family:sans-serif;display:grid;place-items:center;height:100vh\">"
+        f"<p>{message}</p>"
+        "<script>if(window.opener){window.opener.postMessage('yt-oauth-done','*')}"
+        "setTimeout(function(){window.close()},1500)</script>"
+        "</body></html>"
+    )
+
+@app.get("/api/youtube/oauth/callback")
+async def api_youtube_oauth_callback(state: str = "", code: str = "", error: str = ""):
+    return await youtube_oauth_callback(state, code, error)
+
+@app.post("/story/{sid}/publish")
+async def start_publish(sid: str, req: PublishReq):
+    session = await asyncio.to_thread(story_service.get_session, sid)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    film_job = film_service.get_job(sid)
+    if not film_job or film_job["status"] != "done" or not film_job.get("output_path"):
+        raise HTTPException(status_code=400, detail="Render the film before publishing.")
+    metadata = await youtube_service.generate_metadata(session)
+    try:
+        return youtube_service.start_publish(sid, req.uid, film_job["output_path"], metadata)
+    except YouTubeNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except YouTubeNotConnectedError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except YouTubeBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except YouTubeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.post("/api/story/{sid}/publish")
+async def api_start_publish(sid: str, req: PublishReq):
+    return await start_publish(sid, req)
+
+@app.get("/story/{sid}/publish/status")
+def publish_status(sid: str):
+    job = youtube_service.get_job(sid)
+    if not job:
+        raise HTTPException(status_code=404, detail="No publish job for this story yet.")
+    return youtube_service.job_public(job)
+
+@app.get("/api/story/{sid}/publish/status")
+def api_publish_status(sid: str):
+    return publish_status(sid)
 
 @app.websocket("/ws/{sid}")
 async def ws_story(websocket: WebSocket, sid: str):
