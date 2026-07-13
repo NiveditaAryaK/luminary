@@ -79,6 +79,11 @@ class YouTubeService:
             },
             scopes=SCOPES,
             redirect_uri=YT_REDIRECT_URI,
+            # PKCE state cannot survive our stateless flow: the consent URL
+            # and the callback token exchange use separate Flow instances, so
+            # an auto-generated code verifier never matches. As a
+            # confidential client (client secret) we don't need PKCE.
+            autogenerate_code_verifier=False,
         )
 
     def auth_url(self, uid: str) -> str:
