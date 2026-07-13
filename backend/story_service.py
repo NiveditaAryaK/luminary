@@ -32,10 +32,31 @@ NARRATION_BEAT_PROMPT = (
 
 
 class StoryService:
-    def __init__(self, client):
+    def __init__(self, client, session_store=None):
         self.client = client
         self.visuals = VisualEngine(client)
         self.sessions: dict[str, StorySession] = {}
+        self.session_store = session_store
+        self._persist_tasks: set[asyncio.Task] = set()
+
+    def _persist(self, session: StorySession):
+        """Write the session to Firestore without blocking the caller.
+
+        Serialization happens on the caller's thread (cheap); the Firestore
+        writes run in a worker thread. Falls back to a synchronous save when
+        called outside the event loop (sync endpoints run in a threadpool).
+        """
+        if not self.session_store:
+            return
+        state = session.to_state()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.session_store.save(state)
+            return
+        task = loop.create_task(asyncio.to_thread(self.session_store.save, state))
+        self._persist_tasks.add(task)
+        task.add_done_callback(self._persist_tasks.discard)
 
     def _extract_text(self, response) -> str:
         text = getattr(response, "text", None)
@@ -323,6 +344,7 @@ class StoryService:
                     for beat in session.storyboard
                 ],
             })
+            self._persist(session)
             await emit({"type": "status", "content": "beat_complete"})
             logger.info(
                 "Narration beat illustrated for session_id={} turn={} (forced={})",
@@ -348,6 +370,7 @@ class StoryService:
         session = StorySession(genre=genre, premise=premise, title=title, director_mode=director_mode)
         logger.info("Created story session_id={} title='{}' genre='{}'", session.session_id, title, genre)
         self.sessions[session.session_id] = session
+        self._persist(session)
         return {
             "session_id": session.session_id,
             "title": title,
@@ -358,10 +381,22 @@ class StoryService:
         }
 
     def get_session(self, sid: str):
-        return self.sessions.get(sid)
+        """Return the live session, lazily rehydrating from Firestore after a
+        restart or scale-down. Blocks on a store miss — async callers should
+        wrap this in asyncio.to_thread."""
+        session = self.sessions.get(sid)
+        if session or not self.session_store:
+            return session
+        state = self.session_store.load(sid)
+        if not state:
+            return None
+        restored = StorySession.from_state(state)
+        if not restored.anchor_image or not restored.last_image:
+            self.visuals.adopt_restored_images(restored)
+        return self.sessions.setdefault(sid, restored)
 
     def get_snapshot(self, sid: str):
-        session = self.sessions.get(sid)
+        session = self.get_session(sid)
         if not session:
             return None
         return session.snapshot()
@@ -404,6 +439,7 @@ class StoryService:
         )
         self.visuals.adopt_restored_images(session)
         self.sessions[session.session_id] = session
+        self._persist(session)
         logger.info("Restored story session_id={} title='{}' turns={}", session.session_id, title, turns)
         return {
             "session_id": session.session_id,
@@ -482,6 +518,7 @@ class StoryService:
                 self._ensure_choices(session, text_context),
                 self._refresh_story_state(session, text_context, image_event, choice),
             )
+            self._persist(session)
             return {
                 "events": [
                     {"type": event.type, "content": event.content, **({"mime_type": event.mime_type} if event.mime_type else {})}
@@ -525,6 +562,7 @@ class StoryService:
                     self._ensure_choices(session, fallback.text),
                     self._refresh_story_state(session, fallback.text, image_event, choice),
                 )
+                self._persist(session)
                 return {
                     "events": [
                         {"type": event.type, "content": event.content, **({"mime_type": event.mime_type} if event.mime_type else {})}

@@ -14,16 +14,18 @@ from film_service import FilmBusyError, FilmInputError, FilmService, FilmUnavail
 from gemini_utils import format_model_error
 from narration_service import NarrationService
 from schemas import CreateReq, FilmReq, NarrationReq, RestoreReq
+from session_store import SessionStore
 from story_service import StoryService
 
 client = None
 story_service = None
 narration_service = None
 film_service = None
+session_store = None
 
 @asynccontextmanager
 async def lifespan(app):
-    global client, narration_service, story_service, film_service
+    global client, narration_service, story_service, film_service, session_store
     logger.remove()
     logger.add(
         os.path.join(os.path.dirname(__file__), "server.log"),
@@ -39,7 +41,8 @@ async def lifespan(app):
         diagnose=False,
     )
     client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-    story_service = StoryService(client)
+    session_store = SessionStore()
+    story_service = StoryService(client, session_store)
     # The TTS client is created lazily on first use, so a startup-time
     # credential hiccup no longer disables narration for good.
     narration_service = NarrationService()
@@ -54,7 +57,11 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 
 @app.get("/health")
-def health(): return {"status":"healthy"}
+def health():
+    return {
+        "status": "healthy",
+        "session_persistence": session_store.status if session_store else "disabled",
+    }
 
 @app.get("/api/health")
 def api_health(): return health()
@@ -142,7 +149,7 @@ def api_synthesize_narration(req: NarrationReq):
 
 @app.post("/story/{sid}/film")
 async def start_film_render(sid: str, req: FilmReq | None = None):
-    session = story_service.get_session(sid)
+    session = await asyncio.to_thread(story_service.get_session, sid)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
@@ -194,7 +201,7 @@ def api_film_download(sid: str):
 @app.websocket("/ws/{sid}")
 async def ws_story(websocket: WebSocket, sid: str):
     await websocket.accept()
-    session = story_service.get_session(sid)
+    session = await asyncio.to_thread(story_service.get_session, sid)
     if not session:
         logger.warning("WebSocket opened for missing session_id={}", sid)
         await websocket.send_json({"type":"error","content":"Session not found"})

@@ -12,6 +12,9 @@ TTS_LANGUAGE_CODE = os.getenv("TTS_LANGUAGE_CODE", "en-US")
 TTS_DEFAULT_VOICE = os.getenv("TTS_DEFAULT_VOICE", "en-US-Standard-F")
 TTS_MAX_CHARS_PER_REQUEST = int(os.getenv("TTS_MAX_CHARS_PER_REQUEST", "1800"))
 NARRATION_BEAT_THRESHOLD = int(os.getenv("NARRATION_BEAT_THRESHOLD", "150"))
+FIRESTORE_PROJECT = os.getenv("FIRESTORE_PROJECT", "")
+SESSION_COLLECTION = os.getenv("SESSION_COLLECTION", "story_sessions")
+SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 PORT = int(os.getenv("PORT", 8080))
 
 SYSTEM_INSTRUCTION = """You are Luminary, a master cinematic storyteller.
