@@ -40,12 +40,9 @@ async def lifespan(app):
     )
     client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     story_service = StoryService(client)
-    try:
-        narration_service = NarrationService()
-        logger.info("Cloud TTS ready")
-    except Exception as exc:
-        narration_service = None
-        logger.warning("Cloud TTS unavailable: {}", exc)
+    # The TTS client is created lazily on first use, so a startup-time
+    # credential hiccup no longer disables narration for good.
+    narration_service = NarrationService()
     film_service = FilmService(narration_service)
     if not film_service.ffmpeg_available():
         logger.warning("ffmpeg not found — film rendering disabled until it is installed")
@@ -110,9 +107,14 @@ async def api_restore_story(req: RestoreReq):
 
 @app.get("/narration/voices")
 def list_narration_voices():
-    if not narration_service:
-        raise HTTPException(status_code=503, detail="Cloud TTS is not configured.")
-    return {"voices": narration_service.list_voices()}
+    try:
+        return {"voices": narration_service.list_voices()}
+    except Exception as exc:
+        logger.warning("Cloud TTS voices unavailable: {}", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cloud TTS unavailable: {str(exc)[:300]}",
+        ) from exc
 
 @app.get("/api/narration/voices")
 def api_list_narration_voices():
@@ -120,8 +122,6 @@ def api_list_narration_voices():
 
 @app.post("/narration/speak")
 def synthesize_narration(req: NarrationReq):
-    if not narration_service:
-        raise HTTPException(status_code=503, detail="Cloud TTS is not configured.")
     try:
         return narration_service.synthesize(
             text=req.text,
@@ -131,7 +131,10 @@ def synthesize_narration(req: NarrationReq):
         )
     except Exception as exc:
         logger.exception("Narration synthesis failed: {}", exc)
-        raise HTTPException(status_code=503, detail="Failed to synthesize narration.") from exc
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to synthesize narration: {str(exc)[:300]}",
+        ) from exc
 
 @app.post("/api/narration/speak")
 def api_synthesize_narration(req: NarrationReq):

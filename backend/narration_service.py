@@ -19,7 +19,16 @@ GENRE_PROSODY = {
 
 class NarrationService:
     def __init__(self):
-        self.client = texttospeech.TextToSpeechClient()
+        self._client = None
+
+    @property
+    def client(self):
+        # Created lazily and retried per call: on Cloud Run the metadata
+        # server can be unavailable during cold start, and a one-shot
+        # constructor failure would disable TTS for the process lifetime.
+        if self._client is None:
+            self._client = texttospeech.TextToSpeechClient()
+        return self._client
 
     def list_voices(self, language_code: str = TTS_LANGUAGE_CODE) -> list[dict]:
         response = self.client.list_voices(language_code=language_code)

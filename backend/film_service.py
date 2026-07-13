@@ -19,7 +19,11 @@ MIN_BEAT_SECONDS = 4.0
 MAX_BEAT_SECONDS = 45.0
 NARRATION_TAIL_SECONDS = 0.8
 MAX_ZOOM = 1.12
-CAPTION_WRAP_CHARS = 46
+SUBTITLE_MAX_CHARS = 170
+SUBTITLE_WRAP_CHARS = 54
+SUBTITLE_MIN_SECONDS = 2.0
+READING_WORDS_PER_SECOND = 2.6
+NARRATION_MAX_CHARS = 1800
 
 FONT_CANDIDATES = [
     r"C:\Windows\Fonts\georgia.ttf",
@@ -59,6 +63,31 @@ def _strip_choice_markup(text: str) -> str:
     cleaned = CHOICE_MARKUP.sub("", text or "")
     cleaned = re.sub(r"\[illustration\]", "", cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
+
+
+def _chunk_prose(text: str, max_chars: int = SUBTITLE_MAX_CHARS) -> list[str]:
+    """Split prose into subtitle-sized chunks on sentence boundaries."""
+    pieces: list[str] = []
+    for sentence in re.split(r"(?<=[.!?…])\s+", text.strip()):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if len(sentence) > max_chars:
+            pieces.extend(textwrap.wrap(sentence, max_chars))
+        else:
+            pieces.append(sentence)
+
+    chunks: list[str] = []
+    current = ""
+    for piece in pieces:
+        if current and len(current) + len(piece) + 1 > max_chars:
+            chunks.append(current)
+            current = piece
+        else:
+            current = f"{current} {piece}".strip()
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _collect_turn_prose(history: list[dict]) -> dict[int, str]:
@@ -254,13 +283,45 @@ class FilmService:
         (workdir / name).write_text(content, encoding="utf-8")
         return name
 
-    def _drawtext(self, textfile: str, font: str, fontsize: int, y: str) -> str:
-        return (
+    def _drawtext(self, textfile: str, font: str, fontsize: int, y: str, enable: str | None = None) -> str:
+        filter_expr = (
             f"drawtext=textfile={textfile}:fontfile={font}:fontsize={fontsize}:"
             "fontcolor=0xf7e9bf:borderw=2:bordercolor=black@0.6:"
-            f"x=(w-text_w)/2:y={y}:box=1:boxcolor=black@0.35:boxborderw=14:"
+            f"x=(w-text_w)/2:y={y}:box=1:boxcolor=black@0.45:boxborderw=14:"
             "line_spacing=8"
         )
+        if enable:
+            filter_expr += f":enable='{enable}'"
+        return filter_expr
+
+    def _subtitle_filters(self, workdir: Path, index: int, text: str, font: str, duration: float) -> list[str]:
+        """Burn the beat's prose as sequential subtitle chunks, timed
+        proportionally to each chunk's length across the beat."""
+        chunks = _chunk_prose(text)
+        if not chunks:
+            return []
+        max_chunks = max(1, int(duration // SUBTITLE_MIN_SECONDS))
+        merge_chars = SUBTITLE_MAX_CHARS
+        while len(chunks) > max_chunks:
+            merge_chars = int(merge_chars * 1.5)
+            chunks = _chunk_prose(text, merge_chars)
+
+        filters = []
+        weights = [len(chunk) for chunk in chunks]
+        total_weight = sum(weights)
+        window = duration - 0.2
+        start = 0.0
+        for chunk_index, chunk in enumerate(chunks):
+            end = start + window * weights[chunk_index] / total_weight
+            textfile = self._write_textfile(
+                workdir, f"sub_{index}_{chunk_index}.txt", chunk, wrap=SUBTITLE_WRAP_CHARS,
+            )
+            filters.append(self._drawtext(
+                textfile, font, 26, "h-text_h-40",
+                enable=f"between(t\\,{start:.2f}\\,{end:.2f})",
+            ))
+            start = end
+        return filters
 
     def _render_card(self, workdir: Path, name: str, filters: list[str], fade_in: bool, fade_out: bool) -> Path:
         chain = filters[:]
@@ -342,11 +403,14 @@ class FilmService:
         image_path = workdir / f"beat_{index}.{extension}"
         image_path.write_bytes(base64.b64decode(beat["image"]))
 
+        narration_text = (beat["narration"] or "").strip()[:NARRATION_MAX_CHARS]
         audio_path = self._synthesize_beat_audio(workdir, film, beat, index)
         if audio_path:
             duration = self._probe_duration(audio_path) + NARRATION_TAIL_SECONDS
         else:
-            duration = 6.0
+            # Silent beat: hold the scene long enough to read the prose.
+            word_count = len(narration_text.split())
+            duration = word_count / READING_WORDS_PER_SECOND + 1.2 if word_count else 6.0
         duration = max(MIN_BEAT_SECONDS, min(duration, MAX_BEAT_SECONDS))
         frames = int(duration * FILM_FPS)
 
@@ -358,11 +422,9 @@ class FilmService:
             "setsar=1",
             self._ken_burns(index, frames),
         ]
-        if font and beat["caption"].strip():
-            caption_file = self._write_textfile(
-                workdir, f"cap_{index}.txt", beat["caption"], wrap=CAPTION_WRAP_CHARS,
-            )
-            video_chain.append(self._drawtext(caption_file, font, 28, "h-text_h-46"))
+        if font:
+            subtitle_text = narration_text or beat["caption"].strip()
+            video_chain += self._subtitle_filters(workdir, index, subtitle_text, font, duration)
         video_chain.append("format=yuv420p")
 
         name = f"seg_beat_{index}.mp4"
