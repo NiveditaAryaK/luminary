@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+from html import escape as html_escape
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -233,7 +234,11 @@ def api_youtube_auth_start(uid: str):
 
 @app.get("/youtube/oauth/callback")
 async def youtube_oauth_callback(state: str = "", code: str = "", error: str = ""):
-    if error or not code:
+    detail = ""
+    if error:
+        message = "YouTube connection was cancelled."
+        detail = error
+    elif not code:
         message = "YouTube connection was cancelled."
     else:
         try:
@@ -241,13 +246,19 @@ async def youtube_oauth_callback(state: str = "", code: str = "", error: str = "
             message = "YouTube connected. You can close this window."
         except Exception as exc:
             logger.exception("YouTube OAuth callback failed: {}", exc)
-            message = "YouTube connection failed. Close this window and try again."
+            message = "YouTube connection failed."
+            detail = str(exc)[:300]
+    auto_close = "setTimeout(function(){window.close()},1500)" if not detail else ""
+    detail_html = (
+        f"<p style=\"max-width:32rem;color:#c8c2b0;font-size:0.85rem\">{html_escape(detail)}</p>"
+        if detail else ""
+    )
     return HTMLResponse(
         "<html><body style=\"background:#0d0f18;color:#f7e9bf;"
         "font-family:sans-serif;display:grid;place-items:center;height:100vh\">"
-        f"<p>{message}</p>"
+        f"<div style=\"text-align:center\"><p>{message}</p>{detail_html}</div>"
         "<script>if(window.opener){window.opener.postMessage('yt-oauth-done','*')}"
-        "setTimeout(function(){window.close()},1500)</script>"
+        f"{auto_close}</script>"
         "</body></html>"
     )
 
