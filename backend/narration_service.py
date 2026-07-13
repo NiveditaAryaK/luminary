@@ -1,4 +1,5 @@
 import base64
+import os
 
 from google.cloud import texttospeech
 from loguru import logger
@@ -27,6 +28,16 @@ class NarrationService:
         # server can be unavailable during cold start, and a one-shot
         # constructor failure would disable TTS for the process lifetime.
         if self._client is None:
+            # A stale GOOGLE_APPLICATION_CREDENTIALS pointing at a key file
+            # that is not in the container (key files are gitignored) would
+            # break every call; drop it and use the runtime service account.
+            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            if creds_path and not os.path.isfile(creds_path):
+                logger.warning(
+                    "GOOGLE_APPLICATION_CREDENTIALS points to missing file '{}'; "
+                    "falling back to application default credentials", creds_path,
+                )
+                os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
             self._client = texttospeech.TextToSpeechClient()
         return self._client
 
