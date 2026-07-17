@@ -11,6 +11,7 @@ Luminary is a multimodal storytelling agent built for the Gemini Live Agent Chal
 - Supports live spoken narration: the user tells the story out loud and Luminary detects scene beats and illustrates them as they speak
 - Supports narration playback with browser speech and optional Google Cloud Text-to-Speech
 - Saves stories to Firestore so users can resume unfinished sessions; live sessions are also persisted server-side so they survive restarts and scale-downs
+- Guests can start immediately (anonymous auth); signing in with Google upgrades the guest account in place, so stories created as a guest carry over
 - Adds director modes, story memory, and a visual recap strip for continuity
 - **Finish story → film**: renders the storyboard into an MP4 with Cloud TTS voice narration, burned-in prose subtitles, title/end cards, Ken Burns motion, and crossfades
 - **One-click YouTube publish**: uploads the rendered film to the user's channel with Gemini-written title, description, and tags
@@ -19,7 +20,7 @@ Luminary is a multimodal storytelling agent built for the Gemini Live Agent Chal
 
 - Frontend: React, Vite, Firebase Auth, Firestore
 - Backend: FastAPI, WebSockets, Pydantic, Loguru
-- AI: Google Gemini via `google-genai`, Google ADK
+- AI: Google Gemini via `google-genai`
 - Voice: browser Web Speech APIs, Google Cloud Text-to-Speech
 - Film: ffmpeg (bundled in the Docker image; `winget install Gyan.FFmpeg` locally)
 - Publish: YouTube Data API v3 (OAuth, resumable uploads)
@@ -134,6 +135,8 @@ VITE_FIREBASE_APP_ID=...
 VITE_FIREBASE_MEASUREMENT_ID=...
 ```
 
+Vite inlines these at build time, so for deployed builds they must reach the Docker build as build args — see [Deployment](#deployment).
+
 ### 3. Firebase setup
 
 In Firebase console:
@@ -225,6 +228,20 @@ All routes are also available under an `/api` prefix (used by the frontend).
 
 Pushing to `master` triggers Cloud Build (`cloudbuild.yaml`): the Docker image is built (frontend compiled inside the image, ffmpeg installed), pushed to Artifact Registry, and deployed to Cloud Run.
 
+The Firebase web config is baked into the frontend bundle at build time, so the Cloud Build **trigger** must define these substitution variables (Cloud Build → Triggers → edit → Substitution variables), mirroring `frontend/.env.local`:
+
+```text
+_VITE_FIREBASE_API_KEY
+_VITE_FIREBASE_AUTH_DOMAIN
+_VITE_FIREBASE_PROJECT_ID
+_VITE_FIREBASE_STORAGE_BUCKET
+_VITE_FIREBASE_MESSAGING_SENDER_ID
+_VITE_FIREBASE_APP_ID
+_VITE_FIREBASE_MEASUREMENT_ID
+```
+
+If they are missing, the build still succeeds but the deployed app runs without Firebase — no sign-in and no saved-stories archive.
+
 Cloud Run service checklist:
 
 - CPU **always allocated**, memory **1 GiB+**, max instances 1 (sessions are cached per instance)
@@ -252,6 +269,7 @@ Cloud Run service checklist:
   - confirm Firebase Auth providers are enabled
   - confirm Firestore rules are published
   - confirm you are signed in with the same Firebase user
+  - note: signing in with Google normally upgrades the guest account (stories carry over), but if that Google account already has its own Luminary user, the app switches to it and shows that account's archive instead
 
 - No voice in rendered films / no Cloud narration
   - check `GET /api/narration/voices` — the error message states the cause

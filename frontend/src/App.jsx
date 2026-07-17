@@ -16,21 +16,32 @@ export default function App() {
       return null
     }
   })
-  const [stories, setStories] = useState(() => {
-    try {
-      return JSON.parse(window.localStorage.getItem(STORIES_CACHE_KEY) || '[]')
-    } catch {
-      return []
-    }
-  })
+  const [stories, setStories] = useState([])
   const [resumeError, setResumeError] = useState('')
   const { isFirebaseConfigured, logout, ready, signInWithGoogle, user } = useAuth()
 
   useEffect(() => {
-    if (!isFirebaseConfigured || !user?.uid) return
+    // The legacy cache was shared across users, so it showed stale archives
+    // from other accounts/sessions; drop it in favor of per-uid keys.
+    window.localStorage.removeItem(STORIES_CACHE_KEY)
+  }, [])
+
+  useEffect(() => {
+    if (!isFirebaseConfigured || !user?.uid) {
+      setStories([])
+      return
+    }
+
+    const cacheKey = `${STORIES_CACHE_KEY}_${user.uid}`
+    try {
+      setStories(JSON.parse(window.localStorage.getItem(cacheKey) || '[]'))
+    } catch {
+      setStories([])
+    }
+
     return subscribeToStories(user.uid, (nextStories) => {
       setStories(nextStories)
-      window.localStorage.setItem(STORIES_CACHE_KEY, JSON.stringify(nextStories))
+      window.localStorage.setItem(cacheKey, JSON.stringify(nextStories))
     })
   }, [isFirebaseConfigured, user?.uid])
 
